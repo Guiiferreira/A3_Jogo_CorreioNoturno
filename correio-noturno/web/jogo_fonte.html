@@ -1,0 +1,1614 @@
+<title>Correio Noturno</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#121426">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@500;700&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+  /* Layout: uma tela só, o canvas ocupa todo o espaço livre (sem rolagem). */
+  :root {
+    --noite: #121426;
+    --noite-funda: #0b0c18;
+    --papel: #f0e8d2;
+    --lampiao: #ffc85a;
+    --fonte-titulo: "Pixelify Sans", "Courier New", monospace;
+    --fonte-texto: "Atkinson Hyperlegible", system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; background: var(--noite-funda); color: var(--papel); }
+  body {
+    margin: 0; overflow: hidden; touch-action: none;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+    font-family: var(--fonte-texto);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    box-sizing: border-box;
+  }
+  #palco { position: relative; width: 100%; height: 100%; display: grid; place-items: center; }
+  #jogo { display: block; image-rendering: pixelated; background: var(--noite); border-radius: 6px;
+          outline: none; }
+  #carregando { position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+                font-family: var(--fonte-titulo); color: var(--lampiao); font-size: 1.4rem; }
+  #carregando small { display: block; margin-top: .5rem; color: var(--papel); opacity: .7;
+                      font-family: var(--fonte-texto); font-size: .9rem; }
+  #carregando[hidden] { display: none; }
+</style>
+
+<div id="palco">
+  <canvas id="jogo" tabindex="0" aria-label="Correio Noturno, jogo"></canvas>
+  <div id="carregando">Correio Noturno<small>carregando a cidade...</small></div>
+</div>
+
+<script>
+"use strict";
+/* =========================================================================
+   CORREIO NOTURNO — versão web/celular (HTML5 Canvas)
+   Mesmo jogo da versão em pygame, adaptado para tela em pé e toque.
+   Os sprites e sons vêm da pasta assets/ (embutidos pelo tools/gerar_web.py).
+   ========================================================================= */
+const ASSETS = __ASSETS__;
+
+// ------------------------------------------------------------------ config
+const W = 540;                 // largura lógica (a altura se adapta à tela)
+let H = 960;
+const C = {
+  texto: "#f0e8d2", apagado: "#9a9ab4", destaque: "#ffc85a", perigo: "#eb5a50",
+  sucesso: "#82dc8c", painel: "rgba(24,26,50,0.92)", borda: "#5a608c", fundo: "#121426",
+};
+const FT = '"Pixelify Sans", "Courier New", monospace';
+const FC = '"Atkinson Hyperlegible", system-ui, sans-serif';
+const MINUTOS_NOITE = 360;
+
+const DIFICULDADES = {
+  "Fácil":   { segundos: 330, inimigos: 0.8,  vidas: 4 },
+  "Normal":  { segundos: 250, inimigos: 1.0,  vidas: 3 },
+  "Difícil": { segundos: 200, inimigos: 1.25, vidas: 3 },
+};
+const ORDEM_DIF = ["Fácil", "Normal", "Difícil"];
+
+const FASES = [
+  { nome: "Bairro das Acácias", tema: "bairro", meta: 8, rolagem: 70,
+    carta: 2.6, janela: 3.2, gato: 4.5, fio: 5.5, corvo: null, vento: false, nevoa: false,
+    powerups: ["pao", "asa"] },
+  { nome: "Centro", tema: "centro", meta: 9, rolagem: 85,
+    carta: 2.5, janela: 3.0, gato: 4.2, fio: 4.8, corvo: 6.0, vento: false, nevoa: false,
+    powerups: ["pao", "asa", "lanterna"] },
+  { nome: "Porto", tema: "porto", meta: 10, rolagem: 95,
+    carta: 2.4, janela: 2.9, gato: 5.0, fio: 4.5, corvo: 5.0, vento: true, nevoa: true,
+    powerups: ["lanterna", "pao", "asa"] },
+  { nome: "Torre do Relógio", tema: "torre", meta: 8, rolagem: 100,
+    carta: 2.3, janela: 2.8, gato: 3.8, fio: 4.2, corvo: 4.0, vento: true, nevoa: false,
+    powerups: ["pao", "asa", "lanterna"] },
+];
+
+const POMBO_VEL = 235, VIDAS_MAX = 5, CAPACIDADE = 3, INVENCIVEL = 1.6;
+const ARR_SEG = 0.22, ARR_MULT = 2.6, ARR_RECARGA = 1.4;
+const DUR_PAO = 6, DUR_LANTERNA = 12, INTERVALO_POWERUP = 13;
+
+// Personagens: velocidade/recarga relativas ao Bico; vidas = penas a mais ou a menos;
+// vento/nevoa = quanto sente cada um (1 = normal); libera = fase a concluir ou "vitoria".
+const PERSONAGENS = [
+  { id: "bico", nome: "Bico", titulo: "O veterano", descricao: "Equilibrado. Conhece a rota de olhos fechados.",
+    especial: "Sem ponto fraco", velocidade: 1.0, vidas: 0, capacidade: 3, recarga: 1.4, vento: 1.0, nevoa: 1.0, escala: 1.0, libera: null },
+  { id: "pipoca", nome: "Pipoca", titulo: "A aprendiz", descricao: "Rápida e afobada. A arrancada recarrega quase duas vezes mais rápido.",
+    especial: "Uma pena a menos", velocidade: 1.18, vidas: -1, capacidade: 3, recarga: 0.8, vento: 1.0, nevoa: 1.0, escala: 0.9, libera: 1 },
+  { id: "tiao", nome: "Tião", titulo: "O grandalhão do centro", descricao: "Lento, mas leva 4 cartas na bolsa e aguenta uma pena a mais.",
+    especial: "Mais lento e maior", velocidade: 0.85, vidas: 1, capacidade: 4, recarga: 1.6, vento: 0.8, nevoa: 1.0, escala: 1.15, libera: 2 },
+  { id: "neblina", nome: "Neblina", titulo: "A pomba do porto", descricao: "Quase não sente o vento e enxerga através da neblina.",
+    especial: "Bolsa só para 2 cartas", velocidade: 1.0, vidas: 0, capacidade: 2, recarga: 1.4, vento: 0.35, nevoa: 0.2, escala: 1.0, libera: 3 },
+  { id: "dourado", nome: "Dourado", titulo: "O pombo da lenda", descricao: "Ninguém sabe de onde veio. Um pouco melhor em tudo.",
+    especial: "Secreto", velocidade: 1.12, vidas: 1, capacidade: 4, recarga: 1.0, vento: 0.6, nevoa: 0.6, escala: 1.0, libera: "vitoria" },
+];
+const PERS = Object.fromEntries(PERSONAGENS.map((p) => [p.id, p]));
+const dicaLiberar = (p) => p.libera === "vitoria" ? "Entregue todas as cartas e vença o jogo"
+  : `Conclua a fase ${p.libera} (${FASES[p.libera - 1].nome})`;
+
+// ------------------------------------------------------------------ história
+const INTRO_COMUM = [
+  { texto: "Vila Garoa, meia-noite.\n\nBico é o pombo-correio mais antigo da agência. Amanhã de manhã ele se aposenta." },
+  { texto: "Antes de ir embora, ele precisa escolher quem vai herdar o seu quepe de carteiro-chefe." },
+  { texto: "Mas uma tempestade rasgou o malote da noite. As cartas caíram pelos telhados, e às 6h a cidade acorda.\n\nCarta atrasada é carta perdida." },
+  { texto: "No fundo da bolsa, intacta, ainda está a carta mais importante.\n\nDestinatária: Dona Celeste, no alto da Torre do Relógio." },
+];
+const FALA_INICIAL = {
+  bico: { fala: "Último turno, velho. Vamos fazer isso direito." },
+  pipoca: { fala: "Deixa comigo, seu Bico! Hoje eu mostro que estou pronta.", quem: "pipoca" },
+  tiao: { fala: "Pode descansar a asa, Bico. Hoje quem carrega o malote sou eu.", quem: "tiao" },
+  neblina: { fala: "Noite feia, do jeito que eu gosto. Vamos nessa.", quem: "neblina" },
+  dourado: { fala: "Mais uma noite, mais uma lenda.", quem: "dourado" },
+};
+const intro = (id) => INTRO_COMUM.concat([FALA_INICIAL[id]]);
+const ENCONTROS = {
+  pipoca: { fala: "Seu Bico! Eu vi a tempestade e vim ajudar. Sou rápida, me deixa voar uma noite dessas?", quem: "pipoca" },
+  tiao: { fala: "Ô, carteiro! Conheço cada telhado do centro. Sou lento, mas carrego carta que é uma beleza. Me chama na próxima.", quem: "tiao" },
+  neblina: { fala: "Neblina não me assusta, eu nasci no porto. Se precisar de alguém para a próxima noite, é só chamar.", quem: "neblina" },
+  dourado: { fala: "Todas as cartas antes do sol? Então você merece voar comigo.", quem: "dourado" },
+};
+const FALAS_FASE = [
+  "Bairro tranquilo. Pegue as cartas e entregue nas janelas acesas. Cuidado com os fios... e com os gatos dos telhados.",
+  "No centro os corvos não dormem. E eles adoram papel.",
+  "Vento do mar e neblina no porto. Uma lanterna viria bem agora.",
+  "Lá está ela, a torre. Mais algumas entregas e depois a carta da Dona Celeste.",
+];
+const DICAS = [
+  "Arraste o dedo em qualquer lugar para voar",
+  "Pegue as cartas espalhadas pelos telhados",
+  "Passe sobre uma janela acesa para entregar",
+  "Botão ⚡: arrancada para fugir do bote dos gatos",
+];
+const CELESTE = [
+  { texto: "O sino da torre começa a tocar. Dona Celeste abre a janela e recebe o envelope dourado." },
+  { texto: "Dentro, uma foto antiga de duas meninas na praia e um bilhete:\n\n\"Estou voltando. Me espere no domingo. — Lúcia\"" },
+  { texto: "Era a irmã que ela não via havia quarenta anos." },
+];
+const DESFECHO = {
+  bico: [{ fala: "Agora sim. Pode amanhecer." },
+         { texto: "Bico se aposentou naquela manhã. Pendurou o quepe na porta da agência com um bilhete:\n\n\"Para quem fizer a próxima noite.\"" }],
+  pipoca: [{ fala: "Eu consegui, seu Bico! Eu consegui!", quem: "pipoca" },
+           { texto: "Bico riu, tirou o quepe e colocou na cabeça dela.\n\n\"Ficou grande. Você cresce nele.\"" }],
+  tiao: [{ fala: "Nenhuma carta amassada, chefe.", quem: "tiao" },
+         { texto: "Bico entregou o quepe a Tião. Dizem que, desde aquela noite, nunca mais se perdeu uma carta no centro." }],
+  neblina: [{ fala: "Nem vi a neblina passar.", quem: "neblina" },
+            { texto: "Bico entregou o quepe a Neblina, a primeira carteira-chefe vinda do porto." }],
+  dourado: [{ fala: "A lenda continua.", quem: "dourado" },
+            { texto: "Na agência ninguém sabe quem é o pombo dourado. Mas o quepe de Bico ficou guardado, esperando por ele." }],
+};
+function finalDe(res, id) {
+  const nome = PERS[id].nome;
+  if (res === "vitoria") return CELESTE.concat(DESFECHO[id]);
+  if (res === "amanheceu") return [
+    { texto: "O galo cantou antes da última entrega.\n\nA cidade acordou e algumas cartas ficaram sem destino." },
+    { fala: "Desculpe, Dona Celeste... Essa noite foi comprida demais.", quem: id },
+    { texto: `O quepe ainda não tem dono. Talvez ${nome} tenha mais uma noite.` }];
+  return [
+    { texto: `Cansado e sem forças, ${nome} pousou num telhado e não conseguiu mais voar.` },
+    { fala: "Só um minutinho de descanso... só um...", quem: id },
+    { texto: "As cartas vão ter que esperar a próxima noite." }];
+}
+
+// ------------------------------------------------------------------ utilidades
+const rand = (a, b) => a + Math.random() * (b - a);
+const randInt = (a, b) => Math.floor(rand(a, b + 1));
+const escolher = (lista) => lista[Math.floor(Math.random() * lista.length)];
+const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+const limitar = (v, a, b) => Math.max(a, Math.min(b, v));
+function semente(s) {           // gerador previsível (mulberry32) p/ o cenário
+  return function () {
+    s |= 0; s = s + 0x6D2B79F5 | 0;
+    let t = Math.imul(s ^ s >>> 15, 1 | s);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function distSeg(px, py, ax, ay, bx, by) {
+  const abx = bx - ax, aby = by - ay, c2 = abx * abx + aby * aby || 1;
+  const t = limitar(((px - ax) * abx + (py - ay) * aby) / c2, 0, 1);
+  return dist(px, py, ax + abx * t, ay + aby * t);
+}
+function horaTexto(min) {
+  const h = Math.floor(min / 60), m = Math.floor(min % 60);
+  return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+}
+const guardar = {
+  ler(chave, padrao) { try { const v = localStorage.getItem("correio_" + chave); return v ? JSON.parse(v) : padrao; } catch (e) { return padrao; } },
+  escrever(chave, v) { try { localStorage.setItem("correio_" + chave, JSON.stringify(v)); } catch (e) { /* sem armazenamento */ } },
+};
+
+// ------------------------------------------------------------------ canvas
+const cv = document.getElementById("jogo");
+const ctx = cv.getContext("2d");
+let escalaPx = 1;       // pixels reais por unidade lógica
+function redimensionar() {
+  const caixa = document.getElementById("palco").getBoundingClientRect();
+  const proporcao = caixa.height / Math.max(1, caixa.width);
+  H = Math.round(limitar(W * proporcao, 800, 1240));
+  const escala = Math.min(caixa.width / W, caixa.height / H);
+  cv.style.width = Math.floor(W * escala) + "px";
+  cv.style.height = Math.floor(H * escala) + "px";
+  const dpr = Math.min(3, window.devicePixelRatio || 1);
+  escalaPx = escala * dpr;
+  cv.width = Math.round(W * escalaPx);
+  cv.height = Math.round(H * escalaPx);
+}
+window.addEventListener("resize", redimensionar);
+
+// ------------------------------------------------------------------ imagens
+const IMG = {};
+function carregarImagens() {
+  return Promise.all(Object.entries(ASSETS.img).map(([nome, uri]) => new Promise((ok) => {
+    const im = new Image();
+    im.onload = () => { IMG[nome] = im; ok(); };
+    im.onerror = ok;
+    im.src = uri;
+  })));
+}
+function comContorno(img, cor = "rgba(255,244,210,0.8)") {
+  // contorno claro em volta do sprite (destaca o pombo dos telhados)
+  const sil = document.createElement("canvas");
+  sil.width = img.width; sil.height = img.height;
+  const s = sil.getContext("2d");
+  s.drawImage(img, 0, 0);
+  s.globalCompositeOperation = "source-in";
+  s.fillStyle = cor; s.fillRect(0, 0, sil.width, sil.height);
+  const c = document.createElement("canvas");
+  c.width = img.width + 4; c.height = img.height + 4;
+  const g = c.getContext("2d");
+  for (const [dx, dy] of [[0, 2], [4, 2], [2, 0], [2, 4]]) g.drawImage(sil, dx, dy);
+  g.drawImage(img, 2, 2);
+  return c;
+}
+function escalar(img, e) {
+  if (e === 1) return img;
+  const c = document.createElement("canvas");
+  c.width = Math.round(img.width * e); c.height = Math.round(img.height * e);
+  const g = c.getContext("2d"); g.imageSmoothingEnabled = false;
+  g.drawImage(img, 0, 0, c.width, c.height);
+  return c;
+}
+const SILHUETAS = {};
+function silhueta(nome) {
+  if (!SILHUETAS[nome]) {
+    const im = IMG[nome], c = document.createElement("canvas");
+    c.width = im.width; c.height = im.height;
+    const g = c.getContext("2d"); g.drawImage(im, 0, 0);
+    g.globalCompositeOperation = "source-in"; g.fillStyle = "#0e0f1e"; g.fillRect(0, 0, c.width, c.height);
+    SILHUETAS[nome] = c;
+  }
+  return SILHUETAS[nome];
+}
+function brilhoSprite(raio, r, g, b, forca = 0.55) {
+  const c = document.createElement("canvas");
+  c.width = c.height = raio * 2;
+  const x = c.getContext("2d");
+  const gr = x.createRadialGradient(raio, raio, 0, raio, raio, raio);
+  gr.addColorStop(0, `rgba(${r},${g},${b},${forca})`);
+  gr.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  x.fillStyle = gr; x.fillRect(0, 0, raio * 2, raio * 2);
+  return c;
+}
+
+// ------------------------------------------------------------------ som
+const Som = {
+  ctx: null, buffers: {}, ganhoMus: null, ganhoEf: null, fonte: null, atual: null, pedida: null,
+  volMus: 6, volEf: 7, mudo: false,
+  iniciar() {
+    // iOS só libera áudio depois de um toque: chamado no primeiro toque
+    if (this.ctx) { if (this.ctx.state === "suspended") this.ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
+    this.ctx = new AC();
+    this.ganhoMus = this.ctx.createGain(); this.ganhoMus.connect(this.ctx.destination);
+    this.ganhoEf = this.ctx.createGain(); this.ganhoEf.connect(this.ctx.destination);
+    this.aplicar();
+    for (const [nome, uri] of Object.entries(ASSETS.snd)) {
+      const bin = atob(uri.split(",")[1]);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      this.ctx.decodeAudioData(bytes.buffer, (buf) => {
+        this.buffers[nome] = buf;
+        if (this.pedida === nome) { this.atual = null; this.musica(nome.replace("musica_", "")); }
+      }, () => {});
+    }
+  },
+  aplicar() {
+    if (!this.ctx) return;
+    this.ganhoMus.gain.value = this.mudo ? 0 : this.volMus / 10 * 0.7;
+    this.ganhoEf.gain.value = this.mudo ? 0 : this.volEf / 10;
+  },
+  tocar(nome, vol = 1) {
+    if (!this.ctx || this.mudo) return;
+    const b = this.buffers[nome]; if (!b) return;
+    const s = this.ctx.createBufferSource(); s.buffer = b;
+    const g = this.ctx.createGain(); g.gain.value = vol;
+    s.connect(g); g.connect(this.ganhoEf); s.start();
+  },
+  musica(nome) {
+    const chave = "musica_" + nome;
+    this.pedida = chave;
+    if (this.atual === chave || !this.ctx) return;
+    this.parar();
+    const b = this.buffers[chave]; if (!b) return;      // toca quando terminar de decodificar
+    const s = this.ctx.createBufferSource(); s.buffer = b; s.loop = true;
+    const g = this.ctx.createGain(); g.gain.value = 0;
+    g.gain.linearRampToValueAtTime(1, this.ctx.currentTime + 0.6);
+    s.connect(g); g.connect(this.ganhoMus); s.start();
+    this.fonte = { s, g }; this.atual = chave;
+  },
+  parar() {
+    if (this.fonte) {
+      const { s, g } = this.fonte, t = this.ctx.currentTime;
+      g.gain.setValueAtTime(g.gain.value, t); g.gain.linearRampToValueAtTime(0, t + 0.5);
+      s.stop(t + 0.55);
+    }
+    this.fonte = null; this.atual = null;
+  },
+  alternarMudo() { this.mudo = !this.mudo; this.aplicar(); salvarOpcoes(); },
+};
+
+// ------------------------------------------------------------------ opções e recordes
+const opcoes = Object.assign({ dificuldade: "Normal", volMus: 6, volEf: 7, mudo: false, personagem: "bico" },
+                             guardar.ler("opcoes", {}));
+if (!DIFICULDADES[opcoes.dificuldade]) opcoes.dificuldade = "Normal";
+Som.volMus = opcoes.volMus; Som.volEf = opcoes.volEf; Som.mudo = opcoes.mudo;
+function salvarOpcoes() {
+  opcoes.volMus = Som.volMus; opcoes.volEf = Som.volEf; opcoes.mudo = Som.mudo;
+  guardar.escrever("opcoes", opcoes);
+}
+const progresso = {
+  liberados() { const l = guardar.ler("liberados", []).filter((i) => PERS[i]); if (!l.includes("bico")) l.unshift("bico"); return l; },
+  liberar(id) { const l = this.liberados(); if (l.includes(id)) return false; l.push(id); guardar.escrever("liberados", l); return true; },
+};
+const recordes = {
+  lista() { return guardar.ler("recordes", []).sort((a, b) => b.pontos - a.pontos).slice(0, 5); },
+  entra(p) { const l = this.lista(); return p > 0 && (l.length < 5 || p > l[l.length - 1].pontos); },
+  adicionar(r) { const l = this.lista(); l.push(r); l.sort((a, b) => b.pontos - a.pontos); guardar.escrever("recordes", l.slice(0, 5)); return l.slice(0, 5); },
+};
+
+// ------------------------------------------------------------------ desenho de texto
+function txt(s, x, y, o = {}) {
+  const tam = o.tam || 20, fonte = o.titulo ? FT : FC;
+  ctx.font = `${o.peso || (o.titulo ? 700 : 400)} ${tam}px ${fonte}`;
+  ctx.textAlign = o.al || "center";
+  ctx.textBaseline = o.base || "middle";
+  ctx.globalAlpha = o.alpha == null ? 1 : o.alpha;
+  if (o.sombra !== false) { ctx.fillStyle = "rgba(6,6,16,0.85)"; ctx.fillText(s, x + 2, y + 2); }
+  ctx.fillStyle = o.cor || C.texto;
+  ctx.fillText(s, x, y);
+  ctx.globalAlpha = 1;
+  return ctx.measureText(s).width;
+}
+function quebrar(s, tam, larg, titulo = false) {
+  ctx.font = `${titulo ? 700 : 400} ${tam}px ${titulo ? FT : FC}`;
+  const linhas = [];
+  for (const par of s.split("\n")) {
+    if (!par) { linhas.push(""); continue; }
+    let atual = "";
+    for (const p of par.split(" ")) {
+      const teste = atual ? atual + " " + p : p;
+      if (ctx.measureText(teste).width <= larg) atual = teste;
+      else { linhas.push(atual); atual = p; }
+    }
+    linhas.push(atual);
+  }
+  return linhas;
+}
+function paragrafo(s, x, y, larg, o = {}) {
+  const tam = o.tam || 22, alt = tam * (o.entrelinha || 1.35);
+  for (const l of quebrar(s, tam, larg)) {
+    txt(l, x, y, { ...o, base: "top" }); y += alt;
+  }
+  return y;
+}
+function painel(x, y, w, h, alpha = 0.92) {
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = "#181a32";
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, 12); ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = C.borda; ctx.lineWidth = 3; ctx.stroke();
+}
+function veu(alpha, cor = "8,8,20") { ctx.fillStyle = `rgba(${cor},${alpha})`; ctx.fillRect(0, 0, W, H); }
+function sombra(x, y, w, h, a = 0.35) {
+  ctx.fillStyle = `rgba(0,0,0,${a})`;
+  ctx.beginPath(); ctx.ellipse(x, y, w / 2, h / 2, 0, 0, Math.PI * 2); ctx.fill();
+}
+function img(nome, x, y, o = {}) {      // desenha centralizado, com rotação/escala opcionais
+  const im = typeof nome === "string" ? IMG[nome] : nome;
+  if (!im) return;
+  const e = o.escala || 1;
+  ctx.save(); ctx.translate(x, y);
+  if (o.rot) ctx.rotate(o.rot);
+  if (o.alpha != null) ctx.globalAlpha = o.alpha;
+  ctx.drawImage(im, -im.width * e / 2, -im.height * e / 2, im.width * e, im.height * e);
+  ctx.restore();
+}
+
+// ------------------------------------------------------------------ botões
+// Cada tela tem uma lista de botões; o toque testa os botões primeiro.
+function Botao(x, y, w, h, rotulo, acao, o = {}) { return { x, y, w, h, rotulo, acao, ...o }; }
+function desenharBotoes(lista) {
+  for (const b of lista) {
+    if (b.invisivel) continue;
+    const prim = b.primario;
+    ctx.fillStyle = prim ? "rgba(255,200,90,0.16)" : "rgba(24,26,50,0.88)";
+    ctx.beginPath(); ctx.roundRect(b.x, b.y, b.w, b.h, 10); ctx.fill();
+    ctx.strokeStyle = prim ? C.destaque : C.borda; ctx.lineWidth = prim ? 3 : 2; ctx.stroke();
+    const rot = typeof b.rotulo === "function" ? b.rotulo() : b.rotulo;
+    txt(rot, b.x + b.w / 2, b.y + b.h / 2 + 1, { tam: b.tam || 26, titulo: true, peso: 500,
+        cor: prim ? C.destaque : C.texto });
+  }
+}
+function tocouBotao(lista, x, y) {
+  for (const b of lista) {
+    if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+      Som.tocar(b.som || "menu_ok"); b.acao(); return true;
+    }
+  }
+  return false;
+}
+
+// ================================================================== CENÁRIO
+const QUART = 240, PREDIOS = 192, ALT_CEN = QUART * 5;
+const TEMAS = {
+  bairro: { rua: "#2c2e3e", calcada: "#464858", faixa: "#968c6e", avenidas: [[168, 200], [362, 394]],
+            telhados: ["#964a3c", "#80423a", "#a66046", "#6e5850", "#8c7862"], arvores: true, agua: null, plano: false },
+  centro: { rua: "#262834", calcada: "#424450", faixa: "#c8be78", avenidas: [[150, 190], [350, 390]],
+            telhados: ["#606474", "#525868", "#70707c", "#4a505c", "#786860"], arvores: false, agua: null, plano: true },
+  porto:  { rua: "#302e32", calcada: "#4e4a46", faixa: "#beaa5a", avenidas: [[196, 232]],
+            telhados: ["#963c32", "#326482", "#aa8232", "#467850", "#6e6e78"], arvores: false, agua: [398, W], plano: true },
+  torre:  { rua: "#46403c", calcada: "#605850", faixa: null, avenidas: [[175, 209], [355, 389]],
+            telhados: ["#9e5238", "#8c4632", "#aa6442", "#784234"], arvores: true, agua: null, plano: false },
+};
+function escurecerHex(hex, f) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.min(255, ((n >> 16) & 255) * f), g = Math.min(255, ((n >> 8) & 255) * f), b = Math.min(255, (n & 255) * f);
+  return `rgb(${r | 0},${g | 0},${b | 0})`;
+}
+class Cenario {
+  constructor(tema, sem) {
+    this.t = TEMAS[tema]; this.rnd = semente(sem); this.desl = 0;
+    this.luzes = []; this.colunas = [];
+    this.img = document.createElement("canvas");
+    this.img.width = W; this.img.height = ALT_CEN;
+    this.gerar();
+  }
+  ri(a, b) { return Math.floor(a + this.rnd() * (b - a + 1)); }
+  gerar() {
+    const g = this.img.getContext("2d"), t = this.t;
+    g.fillStyle = t.rua; g.fillRect(0, 0, W, ALT_CEN);
+    const limite = t.agua ? t.agua[0] : W;
+    let x = 0;
+    for (const [a0, a1] of t.avenidas) { this.colunas.push([x + 5, a0 - 5]); x = a1; }
+    this.colunas.push([x + 5, limite - 5]);
+    for (let q = 0; q < ALT_CEN / QUART; q++) {
+      const y0 = q * QUART;
+      this.rua(g, y0 + PREDIOS, limite);
+      for (const [c0, c1] of this.colunas) this.quarteirao(g, c0, y0 + 4, c1 - c0, PREDIOS - 8);
+    }
+    for (const [a0, a1] of t.avenidas) this.avenida(g, a0, a1);
+    if (t.agua) this.aguaDesenho(g, t.agua[0], t.agua[1]);
+  }
+  rua(g, y, limite) {
+    const t = this.t;
+    g.fillStyle = t.calcada; g.fillRect(0, y, limite, 6); g.fillRect(0, y + QUART - PREDIOS - 6, limite, 6);
+    const meio = y + (QUART - PREDIOS) / 2;
+    if (t.faixa) { g.fillStyle = t.faixa; for (let x = 0; x < limite; x += 36) g.fillRect(x, meio - 1, 18, 3); }
+    else {
+      g.strokeStyle = escurecerHex(t.rua, 0.8); g.lineWidth = 1;
+      for (let x = 0; x < limite; x += 12) for (let yy = y + 8; yy < y + QUART - PREDIOS - 8; yy += 8)
+        g.strokeRect(x + ((yy / 8) % 2) * 6 + 0.5, yy + 0.5, 10, 6);
+    }
+    for (let x = 50; x < limite; x += 150) {
+      const px = x + this.ri(-15, 15);
+      g.fillStyle = "#1e1e28"; g.beginPath(); g.arc(px, y + 3, 4, 0, 7); g.fill();
+      g.fillStyle = "#ffe6a0"; g.beginPath(); g.arc(px, y + 3, 2, 0, 7); g.fill();
+      this.luzes.push([px, y + 3, 44]);
+    }
+  }
+  avenida(g, a0, a1) {
+    const t = this.t;
+    g.fillStyle = t.rua; g.fillRect(a0, 0, a1 - a0, ALT_CEN);
+    g.fillStyle = t.calcada; g.fillRect(a0, 0, 4, ALT_CEN); g.fillRect(a1 - 4, 0, 4, ALT_CEN);
+    if (t.faixa) { g.fillStyle = t.faixa; for (let y = 0; y < ALT_CEN; y += 36) g.fillRect((a0 + a1) / 2 - 1, y, 3, 18); }
+    g.fillStyle = "#bebec8";
+    for (let q = 0; q < ALT_CEN / QUART; q++) {
+      const yc = q * QUART + PREDIOS + 8;
+      for (let i = a0 + 5; i < a1 - 5; i += 7) g.fillRect(i, yc - 13, 3, 9);
+    }
+  }
+  quarteirao(g, x0, y0, w, h) {
+    let x = x0;
+    while (x < x0 + w - 24) {
+      let largura = this.ri(58, 110);
+      if (x0 + w - (x + largura) < 40) largura = x0 + w - x;
+      let y = y0;
+      while (y < y0 + h - 24) {
+        let altura = this.ri(66, 104);
+        if (y0 + h - (y + altura) < 40) altura = y0 + h - y;
+        this.telhado(g, x, y, largura - 4, altura - 4);
+        y += altura;
+      }
+      x += largura;
+    }
+  }
+  telhado(g, x, y, w, h) {
+    const t = this.t, cor = t.telhados[Math.floor(this.rnd() * t.telhados.length)];
+    g.fillStyle = "#10101a"; g.fillRect(x + 4, y + 4, w, h);
+    g.fillStyle = cor; g.fillRect(x, y, w, h);
+    if (!t.plano) {
+      g.fillStyle = escurecerHex(cor, 0.8);
+      g.beginPath(); g.moveTo(x + w, y); g.lineTo(x + w, y + h); g.lineTo(x + w / 2, y + h - h / 3);
+      g.lineTo(x + w / 2, y + h / 3); g.closePath(); g.fill();
+      g.strokeStyle = escurecerHex(cor, 0.7); g.lineWidth = 1;
+      for (let yy = y + 4; yy < y + h; yy += 7) { g.beginPath(); g.moveTo(x + 2, yy + 0.5); g.lineTo(x + w - 2, yy + 0.5); g.stroke(); }
+      g.strokeStyle = escurecerHex(cor, 1.15); g.lineWidth = 3;
+      g.beginPath(); g.moveTo(x + w / 2, y + h / 3); g.lineTo(x + w / 2, y + h - h / 3); g.stroke();
+      if (this.rnd() < 0.5) {
+        const cx = this.ri(x + 8, x + w - 18), cy = this.ri(y + 6, y + h - 18);
+        g.fillStyle = "#5a4640"; g.fillRect(cx, cy, 10, 10); g.fillStyle = "#1e1a1a"; g.fillRect(cx + 2, cy + 2, 6, 6);
+      }
+    } else {
+      g.strokeStyle = escurecerHex(cor, 0.75); g.lineWidth = 3; g.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
+      const n = this.ri(1, 3);
+      for (let i = 0; i < n; i++) {
+        const cx = this.ri(x + 10, Math.max(x + 11, x + w - 22)), cy = this.ri(y + 10, Math.max(y + 11, y + h - 22));
+        const tipo = this.rnd();
+        if (tipo < 0.35) { g.fillStyle = "#466e8c"; g.beginPath(); g.arc(cx + 6, cy + 6, 8, 0, 7); g.fill(); g.strokeStyle = "#32506e"; g.lineWidth = 2; g.stroke(); }
+        else if (tipo < 0.7) { g.fillStyle = "#969aa2"; g.fillRect(cx, cy, 16, 11); g.fillStyle = "#5a5e66"; g.beginPath(); g.arc(cx + 8, cy + 5, 4, 0, 7); g.fill(); }
+        else { g.fillStyle = "#283c5a"; g.fillRect(cx, cy, 20, 12); g.fillStyle = "#506e96"; g.fillRect(cx, cy + 5, 20, 1); }
+      }
+    }
+    if (t.arvores && this.rnd() < 0.3) {
+      const ax = this.rnd() < 0.5 ? x - 2 : x + w + 2, ay = this.ri(y, y + h);
+      g.fillStyle = "#22462e"; g.beginPath(); g.arc(ax, ay, 10, 0, 7); g.fill();
+      g.fillStyle = "#305c3a"; g.beginPath(); g.arc(ax - 3, ay - 3, 6, 0, 7); g.fill();
+    }
+  }
+  aguaDesenho(g, x0, x1) {
+    g.fillStyle = "#183456"; g.fillRect(x0, 0, x1 - x0, ALT_CEN);
+    g.fillStyle = "#5a5046"; g.fillRect(x0 - 5, 0, 7, ALT_CEN);
+    g.strokeStyle = "#2c5278"; g.lineWidth = 2;
+    for (let y = 0; y < ALT_CEN; y += 18) for (let x = x0 + 10; x < x1; x += 44) {
+      const xx = x + ((y / 18) % 2) * 18; g.beginPath(); g.moveTo(xx, y); g.lineTo(xx + 12, y); g.stroke();
+    }
+    for (let q = 0; q < ALT_CEN / QUART; q++) {
+      const y = q * QUART + 70;
+      g.fillStyle = "#6e5238"; g.fillRect(x0, y, 100, 16);
+      const bx = x0 + 30 + this.ri(0, 20);
+      g.fillStyle = "#10101a"; g.beginPath(); g.ellipse(bx + 33, y + 40, 32, 13, 0, 0, 7); g.fill();
+      g.fillStyle = "#b43c32"; g.beginPath(); g.ellipse(bx + 30, y + 37, 32, 13, 0, 0, 7); g.fill();
+      g.fillStyle = "#e6dcc8"; g.beginPath(); g.ellipse(bx + 30, y + 37, 12, 7, 0, 0, 7); g.fill();
+      this.luzes.push([bx + 30, y + 37, 32]);
+    }
+  }
+  atualizar(dt, vel) { this.desl = (this.desl + vel * dt) % ALT_CEN; }
+  base() { return Math.floor(this.desl); }
+  desenhar() {
+    const b = this.base();
+    for (let y = b - ALT_CEN; y < H; y += ALT_CEN) ctx.drawImage(this.img, 0, y);
+  }
+  desenharLuzes(intens) {
+    if (intens < 0.03) return;
+    const b = this.base();
+    ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = intens;
+    for (const [x, yl, r] of this.luzes)
+      for (let y = yl + b - ALT_CEN; y < H + r; y += ALT_CEN)
+        if (y > -r) ctx.drawImage(BRILHO_POSTE, x - r, y - r, r * 2, r * 2);
+    ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
+  }
+  local(y) { return (((y - this.base()) % ALT_CEN) + ALT_CEN) % ALT_CEN; }
+  yTelhado(y, margem = 24) {
+    for (let i = 0; i < 70; i++) {
+      const r = this.local(y) % QUART;
+      if (r >= margem && r <= PREDIOS - margem) return y;
+      y -= 4;
+    }
+    return y;
+  }
+  yRua(y) {
+    const meio = PREDIOS + (QUART - PREDIOS) / 2;
+    const r = (((this.local(y) - meio) % QUART) + QUART) % QUART;
+    return y - r;
+  }
+  xTelhado(margem = 24) {
+    const [c0, c1] = escolher(this.colunas);
+    return randInt(c0 + margem, Math.max(c0 + margem + 1, c1 - margem));
+  }
+}
+let BRILHO_POSTE, BRILHO_JANELA, NUVEM;
+
+function desenharCeu(prog) {
+  const esc = Math.max(0, 1 - Math.pow(prog, 1.6));
+  const quente = Math.max(0, (prog - 0.62) / 0.38);
+  const a = (40 + 140 * esc) / 255;
+  ctx.fillStyle = `rgba(${12 + 120 * quente | 0},${14 + 50 * quente | 0},${48 - 20 * quente | 0},${a})`;
+  ctx.fillRect(0, 0, W, H);
+  if (quente > 0) {
+    const gr = ctx.createLinearGradient(0, 0, 0, 220);
+    gr.addColorStop(0, `rgba(255,170,80,${0.32 * quente})`); gr.addColorStop(1, "rgba(255,170,80,0)");
+    ctx.fillStyle = gr; ctx.fillRect(0, 0, W, 220);
+  }
+  return esc;
+}
+
+// ================================================================== EFEITOS
+class Particulas {
+  constructor() { this.l = []; }
+  explodir(x, y, cor, n = 12, vel = 140, tam = 4, vida = 0.6, grav = 0) {
+    for (let i = 0; i < n; i++) {
+      const a = rand(0, Math.PI * 2), v = rand(0.3, 1) * vel, t = rand(0.6, 1) * vida;
+      this.l.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, vida: t, total: t, cor, tam, grav });
+    }
+  }
+  penas(x, y, n = 8) {
+    for (let i = 0; i < n; i++) this.l.push({ x, y, vx: rand(-90, 90), vy: rand(-120, -20), vida: 1.2, total: 1.2, cor: "#dfe6f5", tam: 5, grav: 160 });
+  }
+  brilho(x, y, cor = C.destaque, n = 16) { this.explodir(x, y, cor, n, 180, 3, 0.5); }
+  atualizar(dt, rol) {
+    for (const p of this.l) { p.x += p.vx * dt; p.y += (p.vy + rol) * dt; p.vy += p.grav * dt; p.vx *= 0.98; p.vida -= dt; }
+    this.l = this.l.filter((p) => p.vida > 0);
+  }
+  desenhar() {
+    for (const p of this.l) {
+      const t = Math.max(1, p.tam * (p.vida / p.total) + 1 | 0);
+      ctx.fillStyle = p.cor; ctx.fillRect(p.x - t / 2, p.y - t / 2, t, t);
+    }
+  }
+}
+class Textos {
+  constructor() { this.l = []; }
+  add(msg, x, y, cor = C.destaque, tam = 26) { this.l.push({ msg, x, y, vida: 1, cor, tam }); }
+  atualizar(dt) { for (const t of this.l) { t.y -= 50 * dt; t.vida -= dt; } this.l = this.l.filter((t) => t.vida > 0); }
+  desenhar() { for (const t of this.l) txt(t.msg, limitar(t.x, 80, W - 80), t.y, { tam: t.tam, titulo: true, cor: t.cor, alpha: Math.min(1, t.vida * 2) }); }
+}
+class Vento {
+  constructor(ativo, mult) { this.ativo = ativo; this.mult = mult; this.espera = rand(5, 8); this.estado = "calmo"; this.t = 0; this.dir = 1; this.linhas = []; }
+  atualizar(dt) {
+    if (!this.ativo) return;
+    this.t += dt;
+    if (this.estado === "calmo" && this.t >= this.espera) { this.estado = "aviso"; this.t = 0; this.dir = Math.random() < 0.5 ? -1 : 1; }
+    else if (this.estado === "aviso" && this.t >= 1.2) { this.estado = "soprando"; this.t = 0; Som.tocar("vento", 0.8); }
+    else if (this.estado === "soprando" && this.t >= 2.6) { this.estado = "calmo"; this.t = 0; this.espera = rand(5, 9); }
+    if (this.estado === "soprando" && Math.random() < 0.6) this.linhas.push([this.dir > 0 ? -40 : W + 40, randInt(90, H), randInt(30, 80)]);
+    for (const l of this.linhas) l[0] += this.dir * 700 * dt;
+    this.linhas = this.linhas.filter((l) => l[0] > -120 && l[0] < W + 120);
+  }
+  forca() { return this.estado !== "soprando" ? 0 : this.dir * 160 * Math.sin(Math.PI * this.t / 2.6) * this.mult; }
+  desenhar(t) {
+    ctx.strokeStyle = "rgba(200,210,230,0.9)"; ctx.lineWidth = 2;
+    for (const [x, y, c] of this.linhas) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - this.dir * c, y); ctx.stroke(); }
+    if (this.estado === "aviso" && Math.floor(t * 6) % 2 === 0) {
+      const s = this.dir > 0 ? "»»" : "««";
+      txt(`${s}  VENTO  ${s}`, W / 2, 150, { tam: 34, titulo: true, cor: C.destaque });
+    }
+  }
+}
+class Nevoa {
+  constructor(ativa) { this.ativa = ativa; this.n = []; if (ativa) for (let i = 0; i < 4; i++) this.nova(rand(-200, H)); }
+  nova(y) { this.n.push([rand(-120, W - 140), y == null ? -320 : y, rand(-15, 15)]); }
+  atualizar(dt, rol) {
+    if (!this.ativa) return;
+    for (const n of this.n) { n[0] += n[2] * dt; n[1] += rol * 0.6 * dt; }
+    this.n = this.n.filter((n) => n[1] < H + 40);
+    while (this.n.length < 4 + Math.floor(H / 500)) this.nova();
+  }
+  desenhar(transp) {
+    if (!this.ativa) return;
+    ctx.globalAlpha = transp;
+    for (const [x, y] of this.n) ctx.drawImage(NUVEM, x, y);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ================================================================== ENTIDADES
+class Ent {
+  constructor(x, y) { this.x = x; this.y = y; this.vivo = true; this.t = rand(0, 10); this.raio = 16; }
+  atualizar(dt, rol) { this.t += dt; this.y += rol * dt; if (this.y > H + 80) this.vivo = false; }
+  encosta(o, folga = 0) { return dist(this.x, this.y, o.x, o.y) < this.raio + o.raio - folga; }
+}
+class Pombo extends Ent {
+  constructor(pers, vidas) {
+    super(W / 2, H - 170);
+    this.pers = pers; this.vel = POMBO_VEL * pers.velocidade; this.capacidade = pers.capacidade;
+    this.tempoRecarga = pers.recarga; this.raio = Math.round(14 * pers.escala);
+    this.quadros = [0, 1, 2].map((i) => comContorno(escalar(IMG[`pombo_${pers.id}_${i}`], pers.escala)));
+    this.vidas = vidas; this.vidasIniciais = vidas; this.cartas = 0; this.especial = true;
+    this.vx = 0; this.vy = 0; this.invencivel = 0; this.arrancada = 0; this.recarga = 0;
+    this.pao = 0; this.lanterna = 0; this.rastro = [];
+  }
+  dash() { if (this.recarga <= 0) { this.arrancada = ARR_SEG; this.recarga = this.tempoRecarga; return true; } return false; }
+  atualizar(dt, dx, dy, vento) {
+    this.t += dt;
+    const mag = Math.hypot(dx, dy);
+    if (mag > 1) { dx /= mag; dy /= mag; }
+    let vel = this.vel * (this.pao > 0 ? 1.45 : 1);
+    if (this.arrancada > 0) { vel *= ARR_MULT; if (!dx && !dy) dy = -1; }
+    const k = Math.min(1, dt * 14);
+    this.vx += (dx * vel - this.vx) * k; this.vy += (dy * vel - this.vy) * k;
+    this.x = limitar(this.x + (this.vx + vento) * dt, 22, W - 22);
+    this.y = limitar(this.y + this.vy * dt, 110, H - 26);
+    for (const n of ["invencivel", "arrancada", "recarga", "pao", "lanterna"]) this[n] = Math.max(0, this[n] - dt);
+    if (this.arrancada > 0) this.rastro.push([this.x, this.y, 0.25]);
+    for (const r of this.rastro) r[2] -= dt;
+    this.rastro = this.rastro.filter((r) => r[2] > 0);
+  }
+  desenhar() {
+    sombra(this.x + 10, this.y + 22, 34, 14);
+    const rapido = Math.abs(this.vx) + Math.abs(this.vy) > 40;
+    const q = this.quadros[[0, 1, 2, 1][Math.floor(this.t * (rapido ? 14 : 7)) % 4]];
+    const rot = -this.vx / this.vel * 0.25;
+    for (const [x, y, v] of this.rastro) img(q, x, y, { rot, alpha: v / 0.25 * 0.45 });
+    if (this.invencivel > 0 && Math.floor(this.t * 16) % 2 === 0) return;
+    img(q, this.x, this.y, { rot });
+    if (this.pao > 0) { ctx.strokeStyle = "#f0be5a"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(this.x, this.y, 30, 0, 7); ctx.stroke(); }
+  }
+}
+class Carta extends Ent {
+  constructor(x, y, vx = 0, vy = 0) { super(x, y); this.raio = 18; this.vx = vx; this.vy = vy; this.pegavel = (vx || vy) ? 0.6 : 0; }
+  atualizar(dt, rol) { super.atualizar(dt, rol); this.x += this.vx * dt; this.y += this.vy * dt; this.vx *= 0.92; this.vy *= 0.92; this.pegavel = Math.max(0, this.pegavel - dt); this.x = limitar(this.x, 16, W - 16); }
+  desenhar() { sombra(this.x + 6, this.y + 14, 28, 10, 0.28); img("carta", this.x, this.y + Math.sin(this.t * 3) * 3, { rot: Math.sin(this.t * 2) * 0.17 }); }
+}
+class Janela extends Ent {
+  constructor(x, y) { super(x, y); this.raio = 22; this.acesa = true; }
+  desenharBrilho() {
+    if (!this.acesa) return;
+    const p = 1 + 0.15 * Math.sin(this.t * 4), r = 60 * p;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.drawImage(BRILHO_JANELA, this.x - r, this.y - r, r * 2, r * 2);
+    ctx.globalCompositeOperation = "source-over";
+  }
+  desenhar() {
+    img(this.acesa ? "janela_acesa" : "janela_apagada", this.x, this.y);
+    if (this.acesa) img("carta_hud", this.x, this.y - 36 + Math.sin(this.t * 5) * 4);
+    else {
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.strokeStyle = "#141e14"; ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.moveTo(this.x - 7, this.y - 25); ctx.lineTo(this.x - 1, this.y - 19); ctx.lineTo(this.x + 11, this.y - 33); ctx.stroke();
+      ctx.strokeStyle = C.sucesso; ctx.lineWidth = 4; ctx.stroke();
+    }
+  }
+}
+class Gato extends Ent {
+  constructor(x, y, mult) { super(x, y); this.raio = 18; this.casaX = x; this.estado = "espreitando"; this.te = 0; this.mult = mult; this.alvo = [0, 0]; this.vx = 0; this.vy = 0; }
+  atualizar(dt, rol, p) {
+    super.atualizar(dt, rol); this.te += dt;
+    if (this.estado === "espreitando") {
+      if (dist(this.x, this.y, p.x, p.y) < 170 && p.y > this.y - 40) { this.estado = "alerta"; this.te = 0; }
+    } else if (this.estado === "alerta") {
+      this.alvo = [p.x, p.y];
+      if (this.te > 0.55 / this.mult) {
+        this.estado = "bote"; this.te = 0;
+        const a = Math.atan2(this.alvo[1] - this.y, this.alvo[0] - this.x), v = 520 * this.mult;
+        this.vx = Math.cos(a) * v; this.vy = Math.sin(a) * v; Som.tocar("miado", 0.7);
+      }
+    } else if (this.estado === "bote") {
+      this.x += this.vx * dt; this.y += this.vy * dt;
+      if (this.te > 0.32) { this.estado = "voltando"; this.te = 0; }
+    } else if (this.estado === "voltando") {
+      this.x += (this.casaX - this.x) * Math.min(1, dt * 2);
+      if (this.te > 1.6) { this.estado = "espreitando"; this.te = 0; }
+    }
+  }
+  desenhar() {
+    sombra(this.x + 6, this.y + 20, 36, 12);
+    const bote = this.estado === "bote";
+    img(bote || this.estado === "alerta" ? "gato_1" : "gato_0", this.x, this.y, { escala: bote ? 1.2 : 1 });
+    if (this.estado === "alerta") txt("!", this.x, this.y - 40, { tam: 40, titulo: true, cor: C.perigo });
+  }
+}
+class Fio extends Ent {
+  constructor(x1, x2, y, inter) { super((x1 + x2) / 2, y); this.x1 = x1; this.x2 = x2; this.inter = inter; this.ligado = true; this.ciclo = rand(0, 3.6); this.faiscas = []; }
+  atualizar(dt, rol) {
+    super.atualizar(dt, rol);
+    if (this.inter) { this.ciclo = (this.ciclo + dt) % 3.6; this.ligado = this.ciclo < 2.2; }
+    if (this.ligado && Math.random() < 0.25) this.faiscas.push([rand(this.x1, this.x2), 0.15]);
+    for (const f of this.faiscas) f[1] -= dt;
+    this.faiscas = this.faiscas.filter((f) => f[1] > 0);
+  }
+  toca(p) { return this.ligado && distSeg(p.x, p.y, this.x1, this.y, this.x2, this.y) < 10; }
+  desenhar() {
+    const y = this.y;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "rgba(10,10,18,0.8)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(this.x1 + 4, y + 8); ctx.lineTo(this.x2 + 4, y + 8); ctx.stroke();
+    if (this.ligado) {
+      const v = Math.sin(this.t * 40) * 1.5;
+      ctx.strokeStyle = "#3cc8ff"; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(this.x1, y); ctx.lineTo(this.x2, y + v); ctx.stroke();
+      ctx.strokeStyle = "#dcfaff"; ctx.lineWidth = 1; ctx.stroke();
+    } else {
+      ctx.strokeStyle = "#464a5a"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(this.x1, y); ctx.lineTo(this.x2, y); ctx.stroke();
+      if (3.6 - this.ciclo < 0.5 && Math.floor(this.t * 12) % 2 === 0) { ctx.strokeStyle = "#3c8cc8"; ctx.lineWidth = 2; ctx.stroke(); }
+    }
+    ctx.fillStyle = "#ffffc8";
+    for (const [fx] of this.faiscas) { ctx.beginPath(); ctx.arc(fx, y + rand(-4, 4), 2, 0, 7); ctx.fill(); }
+    img("poste", this.x1, y); img("poste", this.x2, y);
+  }
+}
+class Corvo extends Ent {
+  constructor(x, y, mult) { super(x, y); this.raio = 15; this.mult = mult; this.vx = 0; this.vy = 120; this.vida = 9; this.fugindo = false; this.comCarta = false; this.t = 0; }
+  fugir(c = false) { this.fugindo = true; this.comCarta = c; }
+  atualizar(dt, rol, p) {
+    this.t += dt; this.vida -= dt;
+    if (this.vida <= 0) this.fugindo = true;
+    let ax, ay;
+    if (this.fugindo) { ax = (this.x > W / 2 ? 1 : -1) * 120; ay = -320; }
+    else { const a = Math.atan2(p.y - this.y, p.x - this.x), v = 150 * this.mult; ax = Math.cos(a) * v; ay = Math.sin(a) * v; }
+    const k = Math.min(1, dt * 1.6);
+    this.vx += (ax - this.vx) * k; this.vy += (ay - this.vy) * k;
+    this.x += this.vx * dt; this.y += this.vy * dt;
+    const fora = this.y < -120 || this.y > H + 120 || this.x < -120 || this.x > W + 120;
+    if (fora && (this.fugindo || this.t > 2)) this.vivo = false;
+  }
+  desenhar() {
+    sombra(this.x + 12, this.y + 26, 34, 14, 0.28);
+    const q = IMG["corvo_" + [0, 1, 2, 1][Math.floor(this.t * 12) % 4]];
+    img(q, this.x, this.y, { rot: Math.atan2(this.vy, this.vx) + Math.PI / 2 });
+    if (this.comCarta) img("carta_hud", this.x, this.y + 18);
+  }
+}
+class PowerUp extends Ent {
+  constructor(x, y, tipo) { super(x, y); this.raio = 20; this.tipo = tipo; }
+  desenhar() {
+    const f = Math.sin(this.t * 3) * 4, r = 24 + Math.sin(this.t * 5) * 3;
+    ctx.strokeStyle = "#ffe696"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(this.x, this.y + f, r, 0, 7); ctx.stroke();
+    img({ pao: "pao", lanterna: "lanterna", asa: "asa_extra" }[this.tipo], this.x, this.y + f);
+  }
+}
+class Torre extends Ent {
+  constructor() { super(W / 2, -140); this.raio = 30; this.parada = 290; }
+  atualizar(dt, rol) { this.t += dt; this.y = Math.min(this.parada, this.y + rol * dt); }
+  entrega() { return [this.x, this.y + 60]; }
+  desenhar() {
+    sombra(this.x + 20, this.y + 96, 140, 40, 0.42);
+    img("torre", this.x, this.y);
+    const [jx, jy] = this.entrega();
+    img("carta_especial_hud", jx, this.y - 112 + Math.sin(this.t * 4) * 4);
+  }
+}
+
+// ================================================================== CONTROLE POR TOQUE
+const toque = { joy: null, dx: 0, dy: 0 };   // joystick virtual (arrastar o dedo)
+const teclas = new Set();
+function direcaoAtual() {
+  let dx = 0, dy = 0;
+  if (teclas.has("ArrowLeft") || teclas.has("a")) dx -= 1;
+  if (teclas.has("ArrowRight") || teclas.has("d")) dx += 1;
+  if (teclas.has("ArrowUp") || teclas.has("w")) dy -= 1;
+  if (teclas.has("ArrowDown") || teclas.has("s")) dy += 1;
+  if (dx || dy) return [dx, dy];
+  return [toque.dx, toque.dy];
+}
+
+// ================================================================== TELAS
+let cena = null;
+const fundo = { cen: null, t: 0, prog: 0.08 };
+function trocar(nova) { cena = nova; if (nova.entrar) nova.entrar(); }
+function atualizarFundo(dt) { fundo.t += dt; fundo.cen.atualizar(dt, 30); }
+function desenharFundo(comPombo = true) {
+  fundo.cen.desenhar();
+  const esc = desenharCeu(fundo.prog);
+  fundo.cen.desenharLuzes(esc);
+  if (comPombo) {
+    const x = W / 2 + Math.sin(fundo.t * 0.6) * 170, y = H * 0.82 + Math.sin(fundo.t * 1.3) * 24;
+    sombra(x + 10, y + 22, 34, 14);
+    img("pombo_" + [0, 1, 2, 1][Math.floor(fundo.t * 8) % 4], x, y);
+  }
+}
+
+// ---------------------------------------------------------------- menu
+function Menu() {
+  const itens = [["Jogar", () => trocar(new Selecao(false)), true], ["Como jogar", () => trocar(new ComoJogar())],
+                 ["Opções", () => trocar(new Opcoes())], ["Recordes", () => trocar(new Recordes())],
+                 ["Créditos", () => trocar(new Creditos())]];
+  this.t = 0;
+  this.entrar = () => { fundo.prog = 0.08; Som.musica("menu"); };
+  this.layout = () => {
+    const topo = Math.max(330, H * 0.4);
+    this.botoes = itens.map(([r, a, p], i) => Botao(W / 2 - 150, topo + i * 72, 300, 58, r, a, { primario: p, tam: 28 }));
+    this.botoes.push(Botao(W - 64, 12, 52, 44, () => (Som.mudo ? "🔇" : "🔊"), () => Som.alternarMudo(), { tam: 22 }));
+  };
+  this.atualizar = (dt) => { this.t += dt; atualizarFundo(dt); };
+  this.desenhar = () => {
+    this.layout();
+    desenharFundo(true); veu(0.35);
+    const y = Math.max(120, H * 0.15) + Math.sin(this.t * 1.5) * 4;
+    txt("CORREIO", W / 2, y, { tam: 76, titulo: true, cor: C.destaque });
+    txt("NOTURNO", W / 2, y + 66, { tam: 76, titulo: true });
+    img("carta_especial", W / 2 + 170, y - 42, { rot: Math.sin(this.t * 2) * 0.14, escala: 1.2 });
+    txt("Um pombo, uma noite e nenhuma", W / 2, y + 128, { tam: 22, cor: C.apagado });
+    txt("carta atrasada.", W / 2, y + 156, { tam: 22, cor: C.apagado });
+    desenharBotoes(this.botoes);
+    txt(`Dificuldade: ${opcoes.dificuldade}`, W / 2, H - 30, { tam: 18, cor: C.apagado });
+  };
+}
+
+// ---------------------------------------------------------------- telas auxiliares
+function TelaFundo(titulo) {
+  this.t = 0;
+  this.voltar = Botao(W / 2 - 110, 0, 220, 54, "Voltar", () => trocar(new Menu()));
+  this.atualizar = (dt) => { this.t += dt; atualizarFundo(dt); };
+  this.base = () => {
+    desenharFundo(false); veu(0.55);
+    txt(titulo, W / 2, 70, { tam: 46, titulo: true, cor: C.destaque });
+    this.voltar.y = H - 84;
+  };
+}
+function ComoJogar() {
+  TelaFundo.call(this, "Como jogar");
+  const itens = [
+    ["carta", "Carta perdida: pegue (cabem 3 na bolsa)."],
+    ["janela_acesa", "Janela acesa: passe por cima para entregar."],
+    ["gato_1", "Gato: quando aparece o \"!\", ele dá o bote."],
+    ["poste", "Fio azul dá choque. Fio cinza está desligado."],
+    ["corvo_0", "Corvo: persegue você e rouba cartas."],
+    ["pao", "Pão: voa mais rápido por alguns segundos."],
+    ["lanterna", "Lanterna: aponta o destino e corta a neblina."],
+    ["asa_extra", "Asa extra: recupera uma pena (vida)."],
+  ];
+  this.desenhar = () => {
+    this.base(); this.botoes = [this.voltar];
+    painel(20, 110, W - 40, 168);
+    txt("Controles", W / 2, 136, { tam: 26, titulo: true, cor: C.destaque });
+    const ctl = [["Arrastar o dedo", "voar"], ["Botão ⚡", "arrancada (desvio rápido)"], ["Botão ❚❚", "pausar"], ["Botão 🔊", "ligar/desligar som"]];
+    ctl.forEach(([a, b], i) => { txt(a, 44, 172 + i * 26, { tam: 19, al: "left", cor: C.destaque, peso: 700 }); txt(b, 210, 172 + i * 26, { tam: 19, al: "left" }); });
+    const topo = 292, passo = Math.min(56, (H - 84 - topo - 150) / itens.length);
+    painel(20, topo, W - 40, itens.length * passo + 20);
+    itens.forEach(([n, d], i) => {
+      const y = topo + 10 + passo * (i + 0.5);
+      const im = IMG[n], e = im && im.height > 40 ? 40 / im.height : 1;
+      img(n, 58, y, { escala: e }); txt(d, 92, y, { tam: 18, al: "left" });
+    });
+    const yr = topo + itens.length * passo + 34;
+    paragrafo("Cumpra a meta de entregas de cada fase antes das 6h. No fim, leve a carta dourada até a Torre do Relógio. Entregas seguidas sem levar dano valem combo.",
+      W / 2, yr, W - 60, { tam: 18, cor: C.apagado });
+    desenharBotoes(this.botoes);
+  };
+}
+function Opcoes() {
+  TelaFundo.call(this, "Opções");
+  const mudarDif = (p) => { const i = ORDEM_DIF.indexOf(opcoes.dificuldade); opcoes.dificuldade = ORDEM_DIF[(i + p + 3) % 3]; salvarOpcoes(); };
+  const vol = (q, p) => { Som[q] = limitar(Som[q] + p, 0, 10); Som.aplicar(); salvarOpcoes(); if (q === "volEf") Som.tocar("coleta"); };
+  this.desenhar = () => {
+    this.base();
+    const linhas = [["Dificuldade", () => opcoes.dificuldade, () => mudarDif(-1), () => mudarDif(1)],
+                    ["Música", () => String(Som.volMus), () => vol("volMus", -1), () => vol("volMus", 1)],
+                    ["Efeitos", () => String(Som.volEf), () => vol("volEf", -1), () => vol("volEf", 1)]];
+    this.botoes = [this.voltar];
+    painel(20, 120, W - 40, 380);
+    linhas.forEach(([rot, val, menos, mais], i) => {
+      const y = 175 + i * 96;
+      txt(rot, W / 2, y - 22, { tam: 22, cor: C.apagado });
+      txt(val(), W / 2, y + 18, { tam: 32, titulo: true, cor: C.destaque });
+      this.botoes.push(Botao(50, y - 6, 64, 50, "−", menos, { tam: 32, som: "menu_mover" }), Botao(W - 114, y - 6, 64, 50, "+", mais, { tam: 32, som: "menu_mover" }));
+    });
+    this.botoes.push(Botao(W / 2 - 130, 432, 260, 52, () => "Som: " + (Som.mudo ? "desligado" : "ligado"), () => Som.alternarMudo()));
+    const d = DIFICULDADES[opcoes.dificuldade];
+    txt(`A noite dura ~${(d.segundos / 60).toFixed(1)} min · ${d.vidas} penas`, W / 2, 530, { tam: 19, cor: C.apagado });
+    desenharBotoes(this.botoes);
+  };
+}
+function Recordes() {
+  TelaFundo.call(this, "Recordes");
+  const lista = recordes.lista();
+  this.desenhar = () => {
+    this.base(); this.botoes = [this.voltar];
+    painel(20, 120, W - 40, 380);
+    const cols = [44, 92, 270, 400];
+    ["#", "Nome", "Pontos", "Nível"].forEach((c, i) => txt(c, cols[i], 160, { tam: 22, al: "left", cor: C.destaque, titulo: true }));
+    if (!lista.length) paragrafo("Ainda não há recordes. Vá entregar umas cartas!", W / 2, 280, W - 100, { tam: 22 });
+    lista.forEach((r, i) => {
+      const y = 220 + i * 56, cor = i === 0 ? C.destaque : C.texto;
+      txt(`${i + 1}º`, cols[0], y, { tam: 26, al: "left", cor, titulo: true });
+      img(`pombo_${r.pombo || "bico"}_0`, cols[1] + 12, y, { escala: 0.7 });
+      txt(r.nome, cols[1] + 34, y, { tam: 26, al: "left", cor, titulo: true });
+      txt(String(r.pontos).padStart(6, "0"), cols[2], y, { tam: 26, al: "left", cor, titulo: true });
+      txt(r.dificuldade, cols[3], y, { tam: 19, al: "left", cor });
+      if (r.venceu) img("carta_especial_hud", cols[3] + 100, y);
+    });
+    desenharBotoes(this.botoes);
+  };
+}
+function Creditos() {
+  TelaFundo.call(this, "Créditos");
+  const nomes = ["Guilherme P. N. Ferreira", "Guilherme Loula Teixeira", "Taissa Almeida Souza De Jesus",
+                 "Victor Hugo Luz Rodrigues Barbosa", "Murilo Sabino F. De Melo", "Leandro Moises Vaz"];
+  this.desenhar = () => {
+    this.base(); this.botoes = [this.voltar];
+    painel(20, 110, W - 40, 470);
+    txt("Correio Noturno", W / 2, 146, { tam: 32, titulo: true, cor: C.destaque });
+    paragrafo("A3 · Usabilidade, desenvolvimento web, mobile e jogos · USJT\nProf. Elzo Brito dos Santos Filho", W / 2, 172, W - 80, { tam: 17, cor: C.apagado });
+    nomes.forEach((n, i) => txt(n, W / 2, 252 + i * 32, { tam: 21 }));
+    paragrafo("Sprites, sons e músicas criados pelo grupo com os scripts de tools/. Versão para celular em HTML5 Canvas, versão principal em Python + pygame-ce. Uso de IA declarado no README.",
+      W / 2, 456, W - 80, { tam: 17, cor: C.apagado });
+    desenharBotoes(this.botoes);
+  };
+}
+
+// ---------------------------------------------------------------- seleção de pombo
+function Selecao(pularIntro) {
+  const liberados = progresso.liberados();
+  let i = Math.max(0, PERSONAGENS.findIndex((p) => p.id === opcoes.personagem && liberados.includes(p.id)));
+  this.t = 0; let tremer = 0;
+  this.entrar = () => Som.musica("menu");
+  const livre = (k) => liberados.includes(PERSONAGENS[k].id);
+  const mover = (d) => { i = (i + d + PERSONAGENS.length) % PERSONAGENS.length; Som.tocar("menu_mover"); };
+  const confirmar = () => {
+    if (!livre(i)) { tremer = 0.4; Som.tocar("dano", 0.5); return; }
+    Som.tocar("menu_ok"); opcoes.personagem = PERSONAGENS[i].id; salvarOpcoes(); iniciarJogo(pularIntro);
+  };
+  this.tecla = (k) => {
+    if (k === "ArrowLeft" || k === "a") mover(-1);
+    else if (k === "ArrowRight" || k === "d") mover(1);
+    else if (k === "Enter" || k === " ") confirmar();
+    else if (k === "Escape") trocar(new Menu());
+  };
+  this.atualizar = (dt) => { this.t += dt; tremer = Math.max(0, tremer - dt); atualizarFundo(dt); };
+  this.desenhar = () => {
+    desenharFundo(false); veu(0.5);
+    txt("Quem voa esta noite?", W / 2, 54, { tam: 36, titulo: true, cor: C.destaque });
+    // fileira de pombos (toque para escolher)
+    const n = PERSONAGENS.length, larg = 92, esp = 8, x0 = W / 2 - (n * larg + (n - 1) * esp) / 2;
+    this.botoes = [];
+    PERSONAGENS.forEach((q, k) => {
+      const x = x0 + k * (larg + esp), y = 90, sel = k === i;
+      ctx.fillStyle = sel ? "rgba(255,200,90,0.16)" : "rgba(24,26,50,0.85)";
+      ctx.beginPath(); ctx.roundRect(x, y, larg, 110, 10); ctx.fill();
+      ctx.strokeStyle = sel ? C.destaque : C.borda; ctx.lineWidth = sel ? 3 : 2; ctx.stroke();
+      const nomeImg = `pombo_${q.id}_${[0, 1, 2, 1][Math.floor(this.t * (sel ? 10 : 4)) % 4]}`;
+      img(livre(k) ? nomeImg : silhueta(nomeImg), x + larg / 2, y + 44 + Math.sin(this.t * 3 + k) * 3);
+      txt(livre(k) ? q.nome : "???", x + larg / 2, y + 92, { tam: 17, peso: 700, cor: sel ? C.destaque : livre(k) ? C.texto : C.apagado });
+      this.botoes.push(Botao(x, y, larg, 110, "", () => { if (k === i) confirmar(); else i = k; }, { invisivel: true, som: "menu_mover" }));
+    });
+    // ficha
+    const q = PERSONAGENS[i], top = 222;
+    painel(20, top, W - 40, 470);
+    const dx = tremer ? Math.sin(this.t * 60) * 6 * (tremer / 0.4) : 0;
+    img(livre(i) ? "retrato_" + q.id : silhueta("retrato_" + q.id), W / 2 + dx, top + 72, { escala: 1.1 });
+    if (livre(i)) {
+      txt(q.nome, W / 2, top + 150, { tam: 34, titulo: true, cor: C.destaque });
+      txt(q.titulo, W / 2, top + 180, { tam: 18, cor: C.apagado });
+      let y = paragrafo(q.descricao, W / 2, top + 202, W - 90, { tam: 19 }) + 12;
+      const base = DIFICULDADES[opcoes.dificuldade].vidas;
+      const barras = [["Velocidade", Math.round(1 + (q.velocidade - 0.8) / 0.1)], ["Penas", base + q.vidas], ["Bolsa", q.capacidade],
+                      ["Arrancada", Math.round(5 - (q.recarga - 0.8) / 0.3)], ["Contra o vento", Math.round(5 - q.vento * 3)]];
+      for (const [rot, v] of barras) {
+        txt(rot, 50, y + 10, { tam: 17, al: "left", cor: C.apagado });
+        for (let k = 0; k < 5; k++) { ctx.fillStyle = k < v ? C.destaque : "#323654"; ctx.beginPath(); ctx.roundRect(230 + k * 50, y + 2, 42, 16, 4); ctx.fill(); }
+        y += 30;
+      }
+      const bom = q.especial === "Sem ponto fraco" || q.especial === "Secreto";
+      txt("Atenção: " + q.especial, W / 2, y + 12, { tam: 18, peso: 700, cor: bom ? C.sucesso : C.perigo });
+      this.botoes.push(Botao(W / 2 - 150, top + 490, 300, 60, "Voar com " + q.nome, confirmar, { primario: true, tam: 26 }));
+    } else {
+      txt("Bloqueado", W / 2, top + 150, { tam: 32, titulo: true, cor: C.apagado });
+      txt("Como liberar:", W / 2, top + 210, { tam: 22, titulo: true, cor: C.destaque });
+      const y = paragrafo(dicaLiberar(q), W / 2, top + 236, W - 100, { tam: 21 });
+      if (q.libera !== "vitoria") paragrafo("Você vai conhecer esse pombo pelo caminho.", W / 2, y + 16, W - 100, { tam: 18, cor: C.apagado });
+    }
+    this.botoes.push(Botao(20, H - 76, 130, 52, "Voltar", () => trocar(new Menu()), { tam: 22 }));
+    txt(`${liberados.length} de ${PERSONAGENS.length} liberados`, W - 30, H - 50, { tam: 17, al: "right", cor: C.apagado });
+    desenharBotoes(this.botoes);
+  };
+}
+
+// ---------------------------------------------------------------- narrativa
+function Narrativa(telas, aoTerminar, prog = null, musica = "menu", titulo = null) {
+  this.i = 0; this.letras = 0; this.t = 0; this.fim = false;
+  this.entrar = () => { if (prog != null) fundo.prog = prog; if (musica) Som.musica(musica); };
+  const atual = () => telas[this.i].fala || telas[this.i].texto;
+  const terminar = () => { if (!this.fim) { this.fim = true; aoTerminar(); } };
+  this.avancar = () => {
+    if (this.fim) return;
+    if (this.letras < atual().length) { this.letras = atual().length; return; }
+    Som.tocar("menu_mover"); this.i++; this.letras = 0;
+    if (this.i >= telas.length) terminar();
+  };
+  this.botoes = [Botao(W - 124, 14, 110, 44, "Pular", terminar, { tam: 22 })];
+  this.toque = () => this.avancar();
+  this.tecla = (k) => { if (k === "Enter" || k === " ") this.avancar(); else if (k === "Escape") terminar(); };
+  this.atualizar = (dt) => { this.t += dt; atualizarFundo(dt); if (this.i < telas.length) this.letras = Math.min(atual().length, this.letras + 48 * dt); };
+  this.desenhar = () => {
+    desenharFundo(false); veu(0.45);
+    if (this.i >= telas.length) return;
+    const tela = telas[this.i], vis = atual().slice(0, Math.floor(this.letras));
+    const cx = W / 2, top = H * 0.26, hCx = 380;
+    if (titulo) txt(titulo, cx, top - 50, { tam: 36, titulo: true, cor: C.destaque });
+    painel(24, top, W - 48, hCx);
+    if (tela.fala) {
+      const quem = tela.quem || "bico";
+      img("retrato_" + quem, cx, top + 80);
+      txt(PERS[quem].nome, cx, top + 146, { tam: 24, titulo: true, cor: C.destaque });
+      paragrafo(vis ? `"${vis}"` : "", cx, top + 186, W - 110, { tam: 25 });
+    } else paragrafo(vis, cx, top + 40, W - 110, { tam: 25 });
+    telas.forEach((_, i) => { ctx.fillStyle = i === this.i ? C.destaque : "#464a64"; ctx.beginPath(); ctx.arc(cx - (telas.length - 1) * 12 + i * 24, top + hCx + 30, 6, 0, 7); ctx.fill(); });
+    if (this.letras >= atual().length && Math.floor(this.t * 2) % 2 === 0) txt("Toque para continuar", cx, H - 60, { tam: 22, cor: C.apagado });
+    desenharBotoes(this.botoes);
+  };
+}
+
+// ---------------------------------------------------------------- partida
+function iniciarJogo(pular) {
+  const dif = opcoes.dificuldade;
+  let pombo = opcoes.personagem;
+  if (!progresso.liberados().includes(pombo)) pombo = "bico";
+  const comecar = () => trocar(new Partida(dif, pombo));
+  if (pular) comecar(); else trocar(new Narrativa(intro(pombo), comecar, 0));
+}
+
+function Partida(difNome, pombo = "bico") {
+  const dif = DIFICULDADES[difNome], mult = dif.inimigos;
+  const S = this;
+  const pers = PERS[pombo];
+  S.pers = pers; S.novoPombo = null; S.douradoLiberado = false;
+  S.pombo = new Pombo(pers, Math.max(1, dif.vidas + pers.vidas));
+  S.minutos = 0; S.pontos = 0; S.combo = 0; S.total = 0; S.t = 0;
+  S.part = new Particulas(); S.textos = new Textos();
+  S.tremor = 0; S.forcaTremor = 0; S.avisoBolsa = 0; S.ultimoTique = -1; S.fase = -1;
+
+  S.proximaFase = () => {
+    S.fase++; const f = FASES[S.fase];
+    S.cen = new Cenario(f.tema, S.fase * 17 + 3);
+    S.cartas = []; S.janelas = []; S.gatos = []; S.fios = []; S.corvos = []; S.pups = [];
+    S.torre = null; S.paraTorre = false; S.entregas = 0; S.tFase = 0;
+    S.vento = new Vento(f.vento, mult); S.nevoa = new Nevoa(f.nevoa);
+    S.timers = { carta: 0.3, janela: 1.5, gato: 3, fio: 4, corvo: 5, pup: INTERVALO_POWERUP * 0.6 };
+    for (const y of [220, 420]) novaCarta(y);
+    novaJanela(140);
+    S.estado = "interludio"; S.tEstado = 0;
+    Som.tocar("sino", 0.7); Som.musica(S.fase < 2 ? "noite" : "madrugada");
+  };
+  const intervalo = (ch) => {
+    let b = FASES[S.fase][ch];
+    if (b == null) return null;
+    if (ch === "gato" || ch === "fio" || ch === "corvo") { b /= mult; b *= 1 - 0.25 * Math.min(1, S.entregas / FASES[S.fase].meta); }
+    return b * rand(0.75, 1.25);
+  };
+  const novaCarta = (y = -30) => S.cartas.push(new Carta(S.cen.xTelhado(), S.cen.yTelhado(y)));
+  const novaJanela = (y = -40) => {
+    for (let i = 0; i < 10; i++) {
+      const x = S.cen.xTelhado(34), yy = S.cen.yTelhado(y, 30);
+      if (S.janelas.every((j) => dist(x, yy, j.x, j.y) > 100)) { S.janelas.push(new Janela(x, yy)); return; }
+    }
+  };
+  const novoFio = () => {
+    const y = S.cen.yRua(-20), larg = randInt(140, 300);
+    const x1 = Math.random() < 0.5 ? randInt(-15, 60) : randInt(120, W - larg);
+    S.fios.push(new Fio(x1, Math.min(W + 15, x1 + larg), y, S.fase >= 1 && Math.random() < 0.55));
+  };
+  const surgir = (dt) => {
+    for (const k in S.timers) S.timers[k] -= dt;
+    const p = S.pombo, f = FASES[S.fase];
+    if (!S.paraTorre) {
+      if (S.timers.carta <= 0 || (!S.cartas.length && !p.cartas && S.timers.carta < 1.2)) { if (S.cartas.length < 5) novaCarta(); S.timers.carta = intervalo("carta"); }
+      if (S.timers.janela <= 0) { if (S.janelas.filter((j) => j.acesa).length < 3) novaJanela(); S.timers.janela = intervalo("janela"); }
+    }
+    if (S.timers.gato <= 0) { S.gatos.push(new Gato(S.cen.xTelhado(), S.cen.yTelhado(-40), mult)); S.timers.gato = intervalo("gato"); }
+    if (S.timers.fio <= 0) { novoFio(); S.timers.fio = intervalo("fio"); }
+    const ic = intervalo("corvo");
+    if (ic != null && S.timers.corvo <= 0) {
+      if (S.corvos.filter((c) => !c.fugindo).length < (S.fase === 3 ? 3 : 2)) {
+        const lado = escolher(["cima", "esq", "dir"]);
+        const x = lado === "cima" ? randInt(60, W - 60) : lado === "esq" ? -40 : W + 40;
+        const y = lado === "cima" ? -40 : randInt(140, 400);
+        S.corvos.push(new Corvo(x, y, mult)); Som.tocar("corvo", 0.6);
+      }
+      S.timers.corvo = ic;
+    }
+    if (S.timers.pup <= 0) {
+      let ops = f.powerups.slice();
+      if (p.vidas >= VIDAS_MAX) ops = ops.filter((o) => o !== "asa");
+      if (p.vidas === 1 && ops.includes("asa")) ops.push("asa");
+      S.pups.push(new PowerUp(S.cen.xTelhado(), -30, escolher(ops)));
+      S.timers.pup = INTERVALO_POWERUP * rand(0.8, 1.2);
+    }
+  };
+
+  // ---------------- toque / teclado
+  S.pausar = () => { if (S.estado === "jogando" || S.estado === "interludio") { S.antes = S.estado; S.estado = "pausado"; Som.tocar("pausa"); if (Som.ctx) Som.ctx.suspend(); } };
+  S.continuar = () => { S.estado = S.antes; if (Som.ctx) Som.ctx.resume(); };
+  S.dash = () => { if (S.estado === "jogando" && S.pombo.dash()) Som.tocar("asa"); };
+  S.botoesJogo = () => [
+    Botao(W - 60, 10, 50, 44, "❚❚", S.pausar, { tam: 20, som: "menu_mover" }),
+  ];
+  S.botaoDash = { x: W - 74, y: () => H - 96, r: 50 };
+  const seguirAposLiberado = () => { Som.tocar("menu_ok"); S.novoPombo = null; S.proximaFase(); };
+  S.toque = () => {
+    if (S.estado === "interludio" && S.tEstado > 0.4) { S.estado = "jogando"; Som.tocar("menu_ok"); }
+    else if (S.estado === "liberado" && S.tEstado > 0.8) seguirAposLiberado();
+  };
+  S.tecla = (k) => {
+    if (S.estado === "pausado") { if (k === "Escape" || k === "p") S.continuar(); return; }
+    if (S.estado === "interludio" && (k === "Enter" || k === " ") && S.tEstado > 0.4) { S.estado = "jogando"; Som.tocar("menu_ok"); return; }
+    if (S.estado === "liberado") { if ((k === "Enter" || k === " ") && S.tEstado > 0.8) seguirAposLiberado(); return; }
+    if (k === "Escape" || k === "p") S.pausar();
+    else if (k === " ") S.dash();
+  };
+  S.tocouDash = (x, y) => S.estado === "jogando" && dist(x, y, S.botaoDash.x, S.botaoDash.y()) < S.botaoDash.r + 14;
+
+  // ---------------- atualização
+  S.atualizar = (dt) => {
+    S.t += dt; S.tEstado += dt;
+    if (S.estado === "pausado") return;
+    if (S.estado === "interludio" || S.estado === "liberado") { S.cen.atualizar(dt, FASES[S.fase].rolagem * 0.3); return; }
+    if (S.estado === "terminando") { mundo(dt, false); if (S.tEstado > 2.6) irParaFinal(); return; }
+    if (S.estado === "concluida") {
+      mundo(dt, true, false);
+      if (S.tEstado > 1.8) {
+        if (S.novoPombo) { S.estado = "liberado"; S.tEstado = 0; Som.tocar("vitoria", 0.7); } else S.proximaFase();
+      }
+      return;
+    }
+    mundo(dt, true); S.tFase += dt;
+    S.minutos += MINUTOS_NOITE / dif.segundos * dt;
+    if (S.minutos >= MINUTOS_NOITE - 30) {
+      const m = Math.floor(S.minutos);
+      if (m % 5 === 0 && m !== S.ultimoTique) { S.ultimoTique = m; Som.tocar("tique"); }
+    }
+    if (S.minutos >= MINUTOS_NOITE) { S.minutos = MINUTOS_NOITE; terminar("amanheceu"); }
+  };
+  const mundo = (dt, controles, surgirAgora = true) => {
+    const rol = FASES[S.fase].rolagem, p = S.pombo;
+    S.cen.atualizar(dt, rol); S.vento.atualizar(dt); S.nevoa.atualizar(dt, rol);
+    const [dx, dy] = controles ? direcaoAtual() : [0, -0.4];
+    p.atualizar(dt, dx, dy, controles ? S.vento.forca() * pers.vento : 0);
+    if (surgirAgora && S.estado === "jogando") surgir(dt);
+    for (const e of [...S.cartas, ...S.janelas, ...S.fios, ...S.pups]) e.atualizar(dt, rol);
+    for (const g of S.gatos) g.atualizar(dt, rol, p);
+    for (const c of S.corvos) c.atualizar(dt, rol, p);
+    if (S.torre) S.torre.atualizar(dt, rol);
+    S.part.atualizar(dt, rol * 0.5); S.textos.atualizar(dt);
+    S.tremor = Math.max(0, S.tremor - dt); S.avisoBolsa = Math.max(0, S.avisoBolsa - dt);
+    if (controles && (S.estado === "jogando" || S.estado === "concluida")) colisoes();
+    for (const n of ["cartas", "janelas", "gatos", "fios", "corvos", "pups"]) S[n] = S[n].filter((e) => e.vivo);
+  };
+
+  // ---------------- colisões
+  const colisoes = () => {
+    const p = S.pombo;
+    for (const c of S.cartas) if (!c.pegavel && p.encosta(c)) {
+      if (p.cartas < p.capacidade) { c.vivo = false; p.cartas++; S.pontos += 10; Som.tocar("coleta"); S.part.brilho(c.x, c.y, "#faf0d2", 10); }
+      else if (!S.avisoBolsa) { S.textos.add("Bolsa cheia!", p.x, p.y - 40, C.perigo, 24); S.avisoBolsa = 1.5; }
+    }
+    for (const j of S.janelas) if (j.acesa && p.cartas > 0 && p.encosta(j)) entregar(j);
+    for (const u of S.pups) if (p.encosta(u)) { u.vivo = false; powerup(u); }
+    if (S.torre && S.paraTorre) {
+      const [jx, jy] = S.torre.entrega();
+      if (dist(p.x, p.y, jx, jy) < 46) { S.part.brilho(jx, jy, C.destaque, 40); terminar("vitoria"); return; }
+    }
+    const prot = p.invencivel > 0 || p.arrancada > 0 || S.estado === "concluida";
+    for (const c of S.corvos) if (!c.fugindo && p.encosta(c, 4) && !prot) {
+      if (p.cartas > 0) {
+        p.cartas--; c.fugir(true); S.combo = 0; p.invencivel = 0.8; Som.tocar("corvo");
+        S.textos.add("Roubaram uma carta!", p.x, p.y - 40, C.perigo, 24); tremer(5, 0.2);
+      } else { c.fugir(); dano(p.x, p.y); }
+      return;
+    }
+    if (prot) return;
+    for (const g of S.gatos) if (g.estado === "bote" && p.encosta(g, 6)) { dano(g.x, g.y); return; }
+    for (const f of S.fios) if (f.toca(p)) { Som.tocar("choque"); dano(p.x, p.y); return; }
+  };
+  const tremer = (f, t) => { S.forcaTremor = Math.max(S.forcaTremor, f); S.tremor = Math.max(S.tremor, t); };
+  const entregar = (j) => {
+    const p = S.pombo;
+    j.acesa = false; p.cartas--; S.combo++;
+    const ganho = 100 + 25 * (S.combo - 1);
+    S.pontos += ganho; S.entregas++; S.total++;
+    Som.tocar("entrega"); S.part.brilho(j.x, j.y, C.destaque, 24); S.textos.add("+" + ganho, j.x, j.y - 50);
+    if (S.entregas >= FASES[S.fase].meta && !S.paraTorre) {
+      if (S.fase === FASES.length - 1) {
+        S.paraTorre = true; S.torre = new Torre();
+        S.textos.add("Agora, a carta dourada!", W / 2, 260, C.destaque, 32); Som.tocar("sino", 0.6);
+      } else {
+        S.estado = "concluida"; S.tEstado = 0; Som.tocar("powerup");
+        // concluir a fase libera um pombo novo (só na primeira vez)
+        for (const q of PERSONAGENS) if (q.libera === S.fase + 1 && progresso.liberar(q.id)) S.novoPombo = q.id;
+      }
+    }
+  };
+  const powerup = (u) => {
+    const p = S.pombo; S.pontos += 25; Som.tocar("powerup"); S.part.brilho(u.x, u.y, "#fff0aa", 18);
+    let msg;
+    if (u.tipo === "pao") { p.pao = DUR_PAO; msg = "Mais rápido!"; }
+    else if (u.tipo === "lanterna") { p.lanterna = DUR_LANTERNA; msg = "Lanterna!"; }
+    else { p.vidas = Math.min(VIDAS_MAX, p.vidas + 1); msg = "+1 pena"; }
+    S.textos.add(msg, u.x, u.y - 30, C.sucesso, 26);
+  };
+  const dano = (x, y) => {
+    const p = S.pombo;
+    p.vidas--; p.invencivel = INVENCIVEL; S.combo = 0;
+    Som.tocar("dano"); tremer(10, 0.35); S.part.penas(p.x, p.y, 10);
+    if (navigator.vibrate) try { navigator.vibrate(80); } catch (e) {}
+    if (p.cartas > 0) {
+      p.cartas--;
+      const a = Math.atan2(p.y - y, p.x - x) + rand(-0.6, 0.6);
+      S.cartas.push(new Carta(p.x, p.y, Math.cos(a) * 240, Math.sin(a) * 240 - 60));
+    }
+    if (p.vidas <= 0) terminar("sem_penas");
+  };
+  const terminar = (res) => {
+    if (S.estado === "terminando") return;
+    S.res = res; S.estado = "terminando"; S.tEstado = 0; Som.parar();
+    if (res === "vitoria") {
+      S.bTempo = Math.floor(MINUTOS_NOITE - S.minutos) * 10; S.bPenas = S.pombo.vidas * 200;
+      S.pontos += S.bTempo + S.bPenas; Som.tocar("vitoria");
+      S.douradoLiberado = progresso.liberar("dourado");
+    } else { S.bTempo = S.bPenas = 0; Som.tocar(res === "amanheceu" ? "galo" : "derrota"); }
+  };
+  const irParaFinal = () => {
+    const resumo = { res: S.res, pontos: S.pontos, entregas: S.total, fase: S.fase + 1, hora: horaTexto(S.minutos),
+                     bTempo: S.bTempo, bPenas: S.bPenas, dificuldade: difNome, pombo };
+    const ceu = S.res === "vitoria" ? 1 : S.res === "amanheceu" ? 0.9 : S.minutos / MINUTOS_NOITE;
+    const irFim = () => trocar(new Fim(resumo));
+    // vencer pela primeira vez revela o pombo secreto
+    const depois = S.douradoLiberado ? () => trocar(new Narrativa([ENCONTROS.dourado], irFim, null, null, "Novo pombo liberado!")) : irFim;
+    trocar(new Narrativa(finalDe(S.res, pombo), depois, ceu, S.res === "vitoria" ? "amanhecer" : "menu"));
+  };
+
+  // ---------------- desenho
+  S.desenhar = () => {
+    const prog = S.minutos / MINUTOS_NOITE, p = S.pombo;
+    ctx.save();
+    if (S.tremor > 0) { const f = S.forcaTremor * Math.min(1, S.tremor / 0.15); ctx.translate(rand(-f, f), rand(-f, f)); }
+    S.cen.desenhar();
+    const esc = desenharCeu(prog);
+    S.cen.desenharLuzes(esc);
+    for (const j of S.janelas) j.desenharBrilho();
+    for (const grupo of [S.janelas, S.fios, S.cartas, S.pups, S.gatos]) for (const e of grupo) e.desenhar();
+    if (S.torre) S.torre.desenhar();
+    for (const c of S.corvos) c.desenhar();
+    p.desenhar(); S.part.desenhar();
+    S.nevoa.desenhar(Math.min(pers.nevoa, p.lanterna > 0 ? 0.25 : 1));
+    S.vento.desenhar(S.t);
+    if (p.lanterna > 0 || S.paraTorre) seta();
+    S.textos.desenhar();
+    ctx.restore();
+    hud();
+    if (S.estado === "jogando" || S.estado === "concluida") controlesNaTela();
+    dicas();
+    if (S.estado === "interludio") interludio();
+    else if (S.estado === "liberado") liberado();
+    else if (S.estado === "pausado") pausa();
+    else if (S.estado === "concluida") {
+      txt("Fase concluída!", W / 2, H / 2 - 30, { tam: 52, titulo: true, cor: C.sucesso });
+      txt(`${S.entregas} cartas entregues`, W / 2, H / 2 + 22, { tam: 24 });
+    } else if (S.estado === "terminando") transicao();
+    S.botoes = S.estado === "pausado" ? S.botoesPausa : (S.estado === "terminando" ? [] : S.botoesJogo());
+    if (S.estado !== "pausado" && S.estado !== "terminando") desenharBotoes(S.botoes);
+  };
+  const seta = () => {
+    const p = S.pombo; let alvo;
+    if (S.paraTorre && S.torre) alvo = S.torre.entrega();
+    else {
+      let lista = p.cartas > 0 ? S.janelas.filter((j) => j.acesa) : S.cartas;
+      if (!lista.length) return;
+      const j = lista.reduce((a, b) => dist(p.x, p.y, a.x, a.y) < dist(p.x, p.y, b.x, b.y) ? a : b);
+      alvo = [j.x, j.y];
+    }
+    if (dist(p.x, p.y, alvo[0], alvo[1]) < 60) return;
+    const a = Math.atan2(alvo[1] - p.y, alvo[0] - p.x), cx = p.x + Math.cos(a) * 46, cy = p.y + Math.sin(a) * 46;
+    const pts = [[cx + Math.cos(a) * 12, cy + Math.sin(a) * 12], [cx + Math.cos(a + 2.4) * 10, cy + Math.sin(a + 2.4) * 10], [cx + Math.cos(a - 2.4) * 10, cy + Math.sin(a - 2.4) * 10]];
+    ctx.fillStyle = C.destaque; ctx.strokeStyle = "#14141e"; ctx.lineWidth = 2;
+    ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath(); ctx.stroke(); ctx.fill();
+  };
+  const hud = () => {
+    const p = S.pombo;
+    ctx.fillStyle = "rgba(12,12,28,0.82)"; ctx.fillRect(0, 0, W, 98);
+    ctx.fillStyle = C.borda; ctx.fillRect(0, 96, W, 2);
+    // linha 1: penas, relógio, pausa
+    for (let i = 0; i < Math.max(p.vidas, p.vidasIniciais); i++) img(i < p.vidas ? "pena_hud" : "pena_hud_vazia", 24 + i * 24, 32);
+    const urg = S.minutos >= MINUTOS_NOITE - 45;
+    txt(horaTexto(S.minutos), W / 2, 30, { tam: 38, titulo: true, cor: urg && Math.floor(S.t * 4) % 2 === 0 ? C.perigo : C.texto });
+    // linha 2: bolsa, entregas, pontos
+    for (let i = 0; i < p.capacidade; i++) img(i < p.cartas ? "carta_hud" : "carta_hud_vazia", 26 + i * 28, 72);
+    if (p.especial) img("carta_especial_hud", 26 + p.capacidade * 28 + 4, 72);
+    const meta = S.paraTorre ? "Vá até a torre!" : `Entregas ${S.entregas}/${FASES[S.fase].meta}`;
+    txt(meta, W / 2, 72, { tam: 20, cor: S.paraTorre ? C.destaque : C.texto, peso: 700 });
+    txt(String(S.pontos).padStart(6, "0"), W - 14, 72, { tam: 26, al: "right", titulo: true, cor: C.destaque });
+    if (S.combo >= 2) txt(`combo x${S.combo}`, W - 74, 30, { tam: 16, al: "right", cor: C.sucesso, peso: 700 });
+    // barra da noite (lua -> sol)
+    const x0 = 34, x1 = W - 34, y = 108;
+    ctx.fillStyle = "rgba(40,44,70,0.9)"; ctx.beginPath(); ctx.roundRect(x0, y - 3, x1 - x0, 6, 3); ctx.fill();
+    const pr = Math.min(1, S.minutos / MINUTOS_NOITE);
+    ctx.fillStyle = `rgb(${90 + 165 * pr | 0},${110 + 60 * pr | 0},${200 - 120 * pr | 0})`;
+    ctx.beginPath(); ctx.roundRect(x0, y - 3, Math.max(6, (x1 - x0) * pr), 6, 3); ctx.fill();
+    ctx.fillStyle = "#e6e6f5"; ctx.beginPath(); ctx.arc(x0 - 14, y, 6, 0, 7); ctx.fill();
+    ctx.fillStyle = "#282c46"; ctx.beginPath(); ctx.arc(x0 - 11, y - 2, 5, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ffbe50"; ctx.beginPath(); ctx.arc(x1 + 14, y, 6, 0, 7); ctx.fill();
+    // power-ups ativos
+    let yy = 140;
+    for (const [nome, t, tot, im] of [["Pão", p.pao, DUR_PAO, "pao"], ["Lanterna", p.lanterna, DUR_LANTERNA, "lanterna"]]) {
+      if (t <= 0) continue;
+      img(im, 28, yy); txt(nome, 50, yy - 8, { tam: 15, al: "left" });
+      ctx.fillStyle = "#282c46"; ctx.fillRect(50, yy + 4, 80, 6); ctx.fillStyle = C.destaque; ctx.fillRect(50, yy + 4, 80 * t / tot, 6);
+      yy += 40;
+    }
+    if (p.recarga > 0) {
+      ctx.strokeStyle = "#96c8ff"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 25, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - p.recarga / p.tempoRecarga)); ctx.stroke();
+    }
+  };
+  const controlesNaTela = () => {
+    // joystick
+    if (toque.joy) {
+      const { ox, oy, x, y } = toque.joy;
+      ctx.strokeStyle = "rgba(240,232,210,0.35)"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(ox, oy, 46, 0, 7); ctx.stroke();
+      const dd = Math.min(46, dist(ox, oy, x, y)), a = Math.atan2(y - oy, x - ox);
+      ctx.fillStyle = "rgba(240,232,210,0.45)"; ctx.beginPath(); ctx.arc(ox + Math.cos(a) * dd, oy + Math.sin(a) * dd, 20, 0, 7); ctx.fill();
+    }
+    // botão de arrancada
+    const b = S.botaoDash, by = b.y(), pronto = S.pombo.recarga <= 0;
+    ctx.fillStyle = pronto ? "rgba(255,200,90,0.22)" : "rgba(40,44,70,0.6)";
+    ctx.beginPath(); ctx.arc(b.x, by, b.r, 0, 7); ctx.fill();
+    ctx.strokeStyle = pronto ? C.destaque : C.borda; ctx.lineWidth = 3; ctx.stroke();
+    if (!pronto) { ctx.strokeStyle = "#96c8ff"; ctx.beginPath(); ctx.arc(b.x, by, b.r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - S.pombo.recarga / S.pombo.tempoRecarga)); ctx.stroke(); }
+    txt("⚡", b.x, by - 4, { tam: 34, sombra: false, cor: pronto ? C.destaque : C.apagado });
+    txt("arrancada", b.x, by + 26, { tam: 13, cor: C.apagado, sombra: false });
+  };
+  const dicas = () => {
+    if (S.fase !== 0 || S.estado !== "jogando" || S.tFase > 16) return;
+    const i = Math.min(DICAS.length - 1, Math.floor(S.tFase / 4));
+    const linhas = quebrar(DICAS[i], 18, W - 190), alt = 24 + linhas.length * 24;
+    painel(20, H - 150 - alt, W - 160, alt, 0.85);
+    paragrafo(DICAS[i], 20 + (W - 160) / 2, H - 150 - alt + 12, W - 190, { tam: 18 });
+  };
+  const interludio = () => {
+    veu(0.6);
+    const f = FASES[S.fase], cx = W / 2, top = H * 0.2;
+    txt(horaTexto(S.minutos), cx, top, { tam: 72, titulo: true, cor: C.destaque });
+    txt(`Fase ${S.fase + 1} de ${FASES.length}`, cx, top + 56, { tam: 22, cor: C.apagado });
+    txt(f.nome, cx, top + 96, { tam: 40, titulo: true });
+    painel(24, top + 132, W - 48, 250);
+    img("retrato_bico", cx, top + 196);
+    paragrafo(`"${FALAS_FASE[S.fase]}"`, cx, top + 256, W - 100, { tam: 21 });
+    let meta = `Meta: entregar ${f.meta} cartas`;
+    txt(meta, cx, top + 412, { tam: 24, cor: C.sucesso, peso: 700 });
+    if (S.fase === FASES.length - 1) txt("e levar a carta dourada à torre", cx, top + 440, { tam: 20, cor: C.sucesso });
+    if (S.fase === 1) txt("Novo: corvos e fios que ligam e desligam", cx, top + 472, { tam: 19, cor: C.destaque });
+    if (S.fase === 2) txt("Novo: rajadas de vento e neblina", cx, top + 472, { tam: 19, cor: C.destaque });
+    if (S.tEstado > 0.4 && Math.floor(S.t * 2) % 2 === 0) txt("Toque para voar", cx, H - 70, { tam: 28, titulo: true });
+  };
+  const liberado = () => {
+    veu(0.75);
+    const q = PERS[S.novoPombo], cx = W / 2, top = H * 0.16, pulo = Math.abs(Math.sin(S.t * 3)) * 6;
+    txt("Novo pombo liberado!", cx, top, { tam: 38, titulo: true, cor: C.destaque });
+    painel(24, top + 40, W - 48, 470);
+    img("retrato_" + q.id, cx, top + 120 - pulo, { escala: 1.2 });
+    txt(q.nome, cx, top + 210, { tam: 34, titulo: true, cor: C.destaque });
+    txt(q.titulo, cx, top + 240, { tam: 19, cor: C.apagado });
+    const y = paragrafo(`"${ENCONTROS[q.id].fala}"`, cx, top + 272, W - 100, { tam: 21 });
+    paragrafo(q.descricao, cx, y + 14, W - 100, { tam: 19, cor: C.sucesso });
+    paragrafo("Escolha este pombo na próxima partida, na tela de seleção.", cx, top + 534, W - 80, { tam: 18, cor: C.apagado });
+    if (S.tEstado > 0.8 && Math.floor(S.t * 2) % 2 === 0) txt("Toque para continuar a noite", cx, H - 70, { tam: 24, titulo: true });
+  };
+  S.botoesPausa = [];
+  const pausa = () => {
+    veu(0.7);
+    txt("Pausado", W / 2, H * 0.22, { tam: 60, titulo: true, cor: C.destaque });
+    const y0 = H * 0.22 + 70;
+    S.botoesPausa = [
+      Botao(W / 2 - 140, y0, 280, 58, "Continuar", S.continuar, { primario: true }),
+      Botao(W / 2 - 140, y0 + 76, 280, 58, "Reiniciar", () => { if (Som.ctx) Som.ctx.resume(); iniciarJogo(true); }),
+      Botao(W / 2 - 140, y0 + 152, 280, 58, () => "Som: " + (Som.mudo ? "desligado" : "ligado"), () => Som.alternarMudo()),
+      Botao(W / 2 - 140, y0 + 228, 280, 58, "Menu principal", () => { if (Som.ctx) Som.ctx.resume(); trocar(new Menu()); }),
+    ];
+    desenharBotoes(S.botoesPausa);
+    paragrafo("Arraste o dedo para voar. Botão ⚡ faz a arrancada, que também protege de dano.",
+      W / 2, y0 + 310, W - 80, { tam: 18, cor: C.apagado });
+  };
+  const transicao = () => {
+    const pr = Math.min(1, S.tEstado / 2.6);
+    const [cor, msg] = S.res === "vitoria" ? ["255,220,160", "Carta entregue!"] : S.res === "amanheceu" ? ["255,170,90", "Amanheceu..."] : ["10,10,20", "Sem forças..."];
+    veu(0.86 * pr, cor);
+    txt(msg, W / 2, H / 2, { tam: 54, titulo: true, sombra: false, alpha: pr, cor: S.res === "sem_penas" ? C.texto : "#3c1e14" });
+  };
+
+  S.proximaFase();
+}
+
+// ---------------------------------------------------------------- fim
+function Fim(r) {
+  this.t = 0;
+  this.digitando = recordes.entra(r.pontos);
+  this.letras = [0, 0, 0];         // iniciais escolhidas com ▲ ▼ (A..Z)
+  this.posicao = null;
+  this.entrar = () => { if (r.res === "vitoria") Som.musica("amanhecer"); else Som.musica("menu"); };
+  const ABC = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const salvar = () => {
+    const nome = this.letras.map((i) => ABC[i]).join("");
+    const lista = recordes.adicionar({ nome, pontos: r.pontos, dificuldade: r.dificuldade, venceu: r.res === "vitoria", pombo: r.pombo });
+    this.posicao = lista.findIndex((x) => x.nome === nome && x.pontos === r.pontos) + 1;
+    this.digitando = false; Som.tocar("powerup");
+  };
+  this.atualizar = (dt) => { this.t += dt; atualizarFundo(dt); };
+  this.tecla = (k) => { if (this.digitando && k === "Enter") salvar(); };
+  this.desenhar = () => {
+    desenharFundo(r.res === "vitoria"); veu(0.55);
+    const [tit, cor] = { vitoria: ["Todas entregues!", C.sucesso], amanheceu: ["O sol nasceu primeiro", C.destaque], sem_penas: [`${PERS[r.pombo].nome} ficou sem forças`, C.perigo] }[r.res];
+    txt(tit, W / 2, 80, { tam: 40, titulo: true, cor });
+    const linhas = [["Cartas entregues", String(r.entregas)], ["Chegou até a fase", `${r.fase} de ${FASES.length}`], ["Hora final", r.hora]];
+    if (r.res === "vitoria") linhas.push(["Bônus de tempo", "+" + r.bTempo], ["Bônus de penas", "+" + r.bPenas]);
+    const hp = 90 + linhas.length * 36;
+    painel(24, 120, W - 48, hp);
+    linhas.forEach(([a, b], i) => { txt(a, 50, 154 + i * 36, { tam: 21, al: "left", cor: C.apagado }); txt(b, W - 50, 154 + i * 36, { tam: 21, al: "right" }); });
+    txt("PONTOS", 50, 120 + hp - 32, { tam: 24, al: "left", titulo: true, cor: C.destaque });
+    txt(String(r.pontos).padStart(6, "0"), W - 50, 120 + hp - 32, { tam: 36, al: "right", titulo: true, cor: C.destaque });
+    let y = 120 + hp + 50;
+    this.botoes = [];
+    if (this.digitando) {
+      txt("Novo recorde! Escolha suas iniciais", W / 2, y, { tam: 22, cor: C.sucesso, peso: 700 });
+      for (let i = 0; i < 3; i++) {
+        const cx = W / 2 - 90 + i * 90, cy = y + 100;
+        ctx.fillStyle = "#181a32"; ctx.beginPath(); ctx.roundRect(cx - 30, cy - 36, 60, 72, 8); ctx.fill();
+        ctx.strokeStyle = C.destaque; ctx.lineWidth = 3; ctx.stroke();
+        txt(ABC[this.letras[i]], cx, cy + 2, { tam: 48, titulo: true, cor: C.destaque });
+        this.botoes.push(Botao(cx - 30, cy - 92, 60, 48, "▲", () => { this.letras[i] = (this.letras[i] + 1) % 26; }, { tam: 22, som: "menu_mover" }),
+                         Botao(cx - 30, cy + 44, 60, 48, "▼", () => { this.letras[i] = (this.letras[i] + 25) % 26; }, { tam: 22, som: "menu_mover" }));
+      }
+      this.botoes.push(Botao(W / 2 - 120, y + 210, 240, 56, "Salvar recorde", salvar, { primario: true }));
+    } else {
+      if (this.posicao) { txt(`Você ficou em ${this.posicao}º no ranking!`, W / 2, y, { tam: 22, cor: C.sucesso }); y += 40; }
+      this.botoes = [Botao(W / 2 - 150, y, 300, 56, "Jogar de novo", () => iniciarJogo(true), { primario: true }),
+                     Botao(W / 2 - 150, y + 70, 300, 56, "Trocar de pombo", () => trocar(new Selecao(true))),
+                     Botao(W / 2 - 150, y + 140, 300, 56, "Recordes", () => trocar(new Recordes())),
+                     Botao(W / 2 - 150, y + 210, 300, 56, "Menu principal", () => trocar(new Menu()))];
+    }
+    desenharBotoes(this.botoes);
+  };
+}
+
+// ================================================================== ENTRADA
+function posLogica(e) {
+  const r = cv.getBoundingClientRect();
+  return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H];
+}
+const dedos = new Map();
+cv.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  Som.iniciar();
+  cv.focus();
+  const [x, y] = posLogica(e);
+  if (cena.botoes && tocouBotao(cena.botoes, x, y)) return;
+  if (cena instanceof Partida && cena.tocouDash && cena.tocouDash(x, y)) { cena.dash(); return; }
+  if (cena instanceof Partida && cena.estado === "jogando" && !toque.joy) {
+    toque.joy = { id: e.pointerId, ox: x, oy: y, x, y };
+    try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+    return;
+  }
+  if (cena.toque) cena.toque(x, y);
+}, { passive: false });
+cv.addEventListener("pointermove", (e) => {
+  if (!toque.joy || toque.joy.id !== e.pointerId) return;
+  const [x, y] = posLogica(e);
+  toque.joy.x = x; toque.joy.y = y;
+  const dx = x - toque.joy.ox, dy = y - toque.joy.oy, d = Math.hypot(dx, dy);
+  if (d < 8) { toque.dx = toque.dy = 0; return; }
+  const forca = Math.min(1, d / 46);
+  toque.dx = dx / d * forca; toque.dy = dy / d * forca;
+  if (d > 70) { toque.joy.ox = x - dx / d * 70; toque.joy.oy = y - dy / d * 70; }  // a base acompanha o dedo
+});
+const soltar = (e) => { if (toque.joy && toque.joy.id === e.pointerId) { toque.joy = null; toque.dx = toque.dy = 0; } };
+cv.addEventListener("pointerup", soltar);
+cv.addEventListener("pointercancel", soltar);
+window.addEventListener("keydown", (e) => {
+  Som.iniciar();
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (k === "m") { Som.alternarMudo(); return; }
+  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(k)) e.preventDefault();
+  teclas.add(k);
+  if (!e.repeat && cena.tecla) cena.tecla(k);
+});
+window.addEventListener("keyup", (e) => teclas.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key));
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && cena instanceof Partida) cena.pausar();
+});
+
+// ================================================================== LAÇO PRINCIPAL
+let ultimo = 0;
+function quadro(agora) {
+  const dt = Math.min(0.05, (agora - ultimo) / 1000 || 0);
+  ultimo = agora;
+  cena.atualizar(dt);
+  ctx.setTransform(escalaPx, 0, 0, escalaPx, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = C.fundo; ctx.fillRect(0, 0, W, H);
+  cena.desenhar();
+  requestAnimationFrame(quadro);
+}
+
+async function iniciar() {
+  redimensionar();
+  try { await Promise.race([Promise.all([document.fonts.load(`700 20px ${FT}`), document.fonts.load(`400 20px ${FC}`), document.fonts.load(`700 20px ${FC}`)]), new Promise((ok) => setTimeout(ok, 2500))]); } catch (e) {}
+  await carregarImagens();
+  BRILHO_POSTE = brilhoSprite(48, 255, 190, 90, 0.32);
+  BRILHO_JANELA = brilhoSprite(60, 255, 180, 60, 0.7);
+  NUVEM = brilhoSprite(150, 200, 206, 220, 0.5);
+  fundo.cen = new Cenario("bairro", 42);
+  document.getElementById("carregando").hidden = true;
+  trocar(new Menu());
+  requestAnimationFrame((t) => { ultimo = t; quadro(t); });
+}
+iniciar();
+</script>
