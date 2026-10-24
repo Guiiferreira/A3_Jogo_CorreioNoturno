@@ -992,13 +992,13 @@ function Recordes() {
 }
 function Creditos() {
   TelaFundo.call(this, "Créditos");
-  const nomes = ["Guilherme P. N. Ferreira", "Guilherme Loula Teixeira", "Taissa Almeida Souza De Jesus",
-                 "Victor Hugo Luz Rodrigues Barbosa", "Murilo Sabino F. De Melo", "Leandro Moises Vaz"];
+  const nomes = ["Guilherme Loula Teixeira", "Guilherme P. N. Ferreira", "Leandro Moises Vaz",
+                 "Murilo Sabino F. De Melo", "Taissa Almeida Souza De Jesus", "Victor Hugo Luz Rodrigues Barbosa"];
   this.desenhar = () => {
     this.base(); this.botoes = [this.voltar];
     painel(20, 110, W - 40, 470);
     txt("Correio Noturno", W / 2, 146, { tam: 32, titulo: true, cor: C.destaque });
-    paragrafo("A3 · Usabilidade, desenvolvimento web, mobile e jogos · USJT\nProf. Elzo Brito dos Santos Filho", W / 2, 172, W - 80, { tam: 17, cor: C.apagado });
+    paragrafo("A3 · Usabilidade, desenvolvimento web, mobile e jogos · USJT\nProfs. Elzo Brito dos Santos Filho e Patrícia Vitorino", W / 2, 172, W - 80, { tam: 17, cor: C.apagado });
     nomes.forEach((n, i) => txt(n, W / 2, 252 + i * 32, { tam: 21 }));
     paragrafo("Sprites, sons e músicas criados pelo grupo com os scripts de tools/. Versão para celular em HTML5 Canvas, versão principal em Python + pygame-ce. Uso de IA declarado no README.",
       W / 2, 456, W - 80, { tam: 17, cor: C.apagado });

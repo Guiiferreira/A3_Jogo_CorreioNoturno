@@ -10,16 +10,16 @@
 | **Grupo** | *(preencher o nome do grupo)* |
 | **Disciplina** | Usabilidade, desenvolvimento web, mobile e jogos (USJT) |
 | **Atividade** | A3 – Desenvolvimento de um Jogo |
-| **Professor** | Elzo Brito dos Santos Filho |
+| **Professores** | Elzo Brito dos Santos Filho e Patrícia Vitorino |
 
 | Integrante | RA |
 |---|---|
-| Guilherme Pereira Nascimento Ferreira | 823122900 |
 | Guilherme Loula Teixeira | 823144030 |
+| Guilherme Pereira Nascimento Ferreira | 823122900 |
+| Leandro Moises Vaz | 823150188 |
+| Murilo Sabino F. De Melo | 824114526 |
 | Taissa Almeida Souza De Jesus | 823144189 |
 | Victor Hugo Luz Rodrigues Barbosa | 824147318 |
-| Murilo Sabino F. De Melo | 824114526 |
-| Leandro Moises Vaz | 823150188 |
 
 ## 2. Descrição
 
@@ -143,12 +143,12 @@ Dentro de cada fase os inimigos aparecem com mais frequência conforme as entreg
 
 | Integrante | Responsabilidade | Arquivos principais |
 |---|---|---|
-| Guilherme P. N. Ferreira | Laço principal, troca de telas, estados da partida e fases | `src/jogo.py`, `src/cenas/partida.py`, `src/config.py` |
 | Guilherme Loula Teixeira | Personagens, inimigos, power-ups e colisões | `src/entidades.py` |
+| Guilherme P. N. Ferreira | Laço principal, troca de telas, estados da partida e fases | `src/jogo.py`, `src/cenas/partida.py`, `src/config.py` |
+| Leandro Moises Vaz | HUD, menus, recordes, README e versão web | `src/hud.py`, `src/ui.py`, `src/dados.py`, `src/cenas/menu.py`, `web/` |
+| Murilo Sabino F. De Melo | Efeitos sonoros, músicas e controle de volume | `tools/gerar_sons.py`, `src/recursos.py`, `src/cenas/telas.py` (Opções) |
 | Taissa Almeida Souza De Jesus | História, falas, finais, personagens e tela de seleção | `src/historia.py`, `src/cenas/narrativa.py`, `src/cenas/selecao.py`, `src/cenas/fim.py` |
 | Victor Hugo Luz Rodrigues Barbosa | Sprites, cenário da cidade e efeitos visuais | `tools/gerar_sprites.py`, `src/cenario.py`, `src/efeitos.py` |
-| Murilo Sabino F. De Melo | Efeitos sonoros, músicas e controle de volume | `tools/gerar_sons.py`, `src/recursos.py`, `src/cenas/telas.py` (Opções) |
-| Leandro Moises Vaz | HUD, menus, recordes, README e versão web | `src/hud.py`, `src/ui.py`, `src/dados.py`, `src/cenas/menu.py`, `web/` |
 
 ## 7. Créditos
 

@@ -179,12 +179,12 @@ class Creditos(TelaComFundo):
     titulo = "Créditos"
 
     INTEGRANTES = [
-        "Guilherme P. N. Ferreira",
         "Guilherme Loula Teixeira",
+        "Guilherme P. N. Ferreira",
+        "Leandro Moises Vaz",
+        "Murilo Sabino F. De Melo",
         "Taissa Almeida Souza De Jesus",
         "Victor Hugo Luz Rodrigues Barbosa",
-        "Murilo Sabino F. De Melo",
-        "Leandro Moises Vaz",
     ]
 
     def desenhar(self, tela):
@@ -195,7 +195,7 @@ class Creditos(TelaComFundo):
         texto(tela, "Correio Noturno", 40, (cx, caixa.top + 34), config.COR_DESTAQUE, negrito=True)
         texto(tela, "A3 · Usabilidade, desenvolvimento web, mobile e jogos · USJT", 22,
               (cx, caixa.top + 68), config.COR_TEXTO_APAGADO)
-        texto(tela, "Prof. Elzo Brito dos Santos Filho", 22, (cx, caixa.top + 92),
+        texto(tela, "Profs. Elzo Brito dos Santos Filho e Patrícia Vitorino", 22, (cx, caixa.top + 92),
               config.COR_TEXTO_APAGADO)
         y = caixa.top + 136
         for i, nome in enumerate(self.INTEGRANTES):
