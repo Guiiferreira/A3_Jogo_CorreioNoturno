@@ -1,3 +1,14 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Correio Noturno: ajude o pombo Bico a entregar as cartas antes do sol nascer.">
+<link rel="icon" type="image/png" href="icone-192.png">
+<link rel="apple-touch-icon" href="icone-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-title" content="Correio Noturno">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);box-sizing:border-box}</style>
 <title>Correio Noturno</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -7,6 +18,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@500;700&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+</head>
+<body>
 <style>
   /* Layout: uma tela só, o canvas ocupa todo o espaço livre (sem rolagem). */
   :root {
@@ -1193,15 +1206,38 @@ function Partida(difNome, pombo = "bico") {
     Botao(W - 60, 10, 50, 44, "❚❚", S.pausar, { tam: 20, som: "menu_mover" }),
   ];
   S.botaoDash = { x: W - 74, y: () => H - 96, r: 50 };
-  const seguirAposLiberado = () => { Som.tocar("menu_ok"); S.novoPombo = null; S.proximaFase(); };
+  // troca de pombo entre as fases: as penas acompanham a diferença entre os pombos
+  // (Tião chega com uma a mais, Pipoca com uma a menos), nunca abaixo de 1
+  const trocarPombo = (id) => {
+    const antigo = S.pers, novo = PERS[id], velho = S.pombo;
+    const vidas = limitar(velho.vidas + novo.vidas - antigo.vidas, 1, VIDAS_MAX);
+    const p = new Pombo(novo, vidas);
+    p.vidasIniciais = Math.max(1, dif.vidas + novo.vidas);
+    p.x = velho.x; p.y = velho.y;
+    p.cartas = Math.min(velho.cartas, p.capacidade); p.especial = velho.especial;
+    S.pombo = p; S.pers = novo;
+    opcoes.personagem = id; salvarOpcoes();
+    Som.tocar("asa");
+  };
+  S.selLib = 0;
+  const seguirAposLiberado = (trocar) => {
+    if (S.tEstado <= 0.8) return;
+    Som.tocar("menu_ok");
+    if (trocar) trocarPombo(S.novoPombo);
+    S.novoPombo = null; S.proximaFase();
+  };
+  S.botoesLiberado = [];
   S.toque = () => {
     if (S.estado === "interludio" && S.tEstado > 0.4) { S.estado = "jogando"; Som.tocar("menu_ok"); }
-    else if (S.estado === "liberado" && S.tEstado > 0.8) seguirAposLiberado();
   };
   S.tecla = (k) => {
     if (S.estado === "pausado") { if (k === "Escape" || k === "p") S.continuar(); return; }
     if (S.estado === "interludio" && (k === "Enter" || k === " ") && S.tEstado > 0.4) { S.estado = "jogando"; Som.tocar("menu_ok"); return; }
-    if (S.estado === "liberado") { if ((k === "Enter" || k === " ") && S.tEstado > 0.8) seguirAposLiberado(); return; }
+    if (S.estado === "liberado") {
+      if (["ArrowUp", "ArrowDown", "w", "s"].includes(k)) { S.selLib = 1 - S.selLib; Som.tocar("menu_mover"); }
+      else if (k === "Enter" || k === " ") seguirAposLiberado(S.selLib === 1);
+      return;
+    }
     if (k === "Escape" || k === "p") S.pausar();
     else if (k === " ") S.dash();
   };
@@ -1216,7 +1252,7 @@ function Partida(difNome, pombo = "bico") {
     if (S.estado === "concluida") {
       mundo(dt, true, false);
       if (S.tEstado > 1.8) {
-        if (S.novoPombo) { S.estado = "liberado"; S.tEstado = 0; Som.tocar("vitoria", 0.7); } else S.proximaFase();
+        if (S.novoPombo) { S.estado = "liberado"; S.tEstado = 0; S.selLib = 0; Som.tocar("vitoria", 0.7); } else S.proximaFase();
       }
       return;
     }
@@ -1232,7 +1268,7 @@ function Partida(difNome, pombo = "bico") {
     const rol = FASES[S.fase].rolagem, p = S.pombo;
     S.cen.atualizar(dt, rol); S.vento.atualizar(dt); S.nevoa.atualizar(dt, rol);
     const [dx, dy] = controles ? direcaoAtual() : [0, -0.4];
-    p.atualizar(dt, dx, dy, controles ? S.vento.forca() * pers.vento : 0);
+    p.atualizar(dt, dx, dy, controles ? S.vento.forca() * S.pers.vento : 0);
     if (surgirAgora && S.estado === "jogando") surgir(dt);
     for (const e of [...S.cartas, ...S.janelas, ...S.fios, ...S.pups]) e.atualizar(dt, rol);
     for (const g of S.gatos) g.atualizar(dt, rol, p);
@@ -1318,12 +1354,12 @@ function Partida(difNome, pombo = "bico") {
   };
   const irParaFinal = () => {
     const resumo = { res: S.res, pontos: S.pontos, entregas: S.total, fase: S.fase + 1, hora: horaTexto(S.minutos),
-                     bTempo: S.bTempo, bPenas: S.bPenas, dificuldade: difNome, pombo };
+                     bTempo: S.bTempo, bPenas: S.bPenas, dificuldade: difNome, pombo: S.pers.id };
     const ceu = S.res === "vitoria" ? 1 : S.res === "amanheceu" ? 0.9 : S.minutos / MINUTOS_NOITE;
     const irFim = () => trocar(new Fim(resumo));
     // vencer pela primeira vez revela o pombo secreto
     const depois = S.douradoLiberado ? () => trocar(new Narrativa([ENCONTROS.dourado], irFim, null, null, "Novo pombo liberado!")) : irFim;
-    trocar(new Narrativa(finalDe(S.res, pombo), depois, ceu, S.res === "vitoria" ? "amanhecer" : "menu"));
+    trocar(new Narrativa(finalDe(S.res, S.pers.id), depois, ceu, S.res === "vitoria" ? "amanhecer" : "menu"));
   };
 
   // ---------------- desenho
@@ -1339,7 +1375,7 @@ function Partida(difNome, pombo = "bico") {
     if (S.torre) S.torre.desenhar();
     for (const c of S.corvos) c.desenhar();
     p.desenhar(); S.part.desenhar();
-    S.nevoa.desenhar(Math.min(pers.nevoa, p.lanterna > 0 ? 0.25 : 1));
+    S.nevoa.desenhar(Math.min(S.pers.nevoa, p.lanterna > 0 ? 0.25 : 1));
     S.vento.desenhar(S.t);
     if (p.lanterna > 0 || S.paraTorre) seta();
     S.textos.desenhar();
@@ -1354,8 +1390,9 @@ function Partida(difNome, pombo = "bico") {
       txt("Fase concluída!", W / 2, H / 2 - 30, { tam: 52, titulo: true, cor: C.sucesso });
       txt(`${S.entregas} cartas entregues`, W / 2, H / 2 + 22, { tam: 24 });
     } else if (S.estado === "terminando") transicao();
-    S.botoes = S.estado === "pausado" ? S.botoesPausa : (S.estado === "terminando" ? [] : S.botoesJogo());
-    if (S.estado !== "pausado" && S.estado !== "terminando") desenharBotoes(S.botoes);
+    S.botoes = S.estado === "pausado" ? S.botoesPausa : S.estado === "liberado" ? S.botoesLiberado
+      : (S.estado === "terminando" ? [] : S.botoesJogo());
+    if (S.estado !== "pausado" && S.estado !== "terminando" && S.estado !== "liberado") desenharBotoes(S.botoes);
   };
   const seta = () => {
     const p = S.pombo; let alvo;
@@ -1454,14 +1491,21 @@ function Partida(difNome, pombo = "bico") {
     veu(0.75);
     const q = PERS[S.novoPombo], cx = W / 2, top = H * 0.16, pulo = Math.abs(Math.sin(S.t * 3)) * 6;
     txt("Novo pombo liberado!", cx, top, { tam: 38, titulo: true, cor: C.destaque });
-    painel(24, top + 40, W - 48, 470);
+    painel(24, top + 40, W - 48, 440);
     img("retrato_" + q.id, cx, top + 120 - pulo, { escala: 1.2 });
     txt(q.nome, cx, top + 210, { tam: 34, titulo: true, cor: C.destaque });
     txt(q.titulo, cx, top + 240, { tam: 19, cor: C.apagado });
     const y = paragrafo(`"${ENCONTROS[q.id].fala}"`, cx, top + 272, W - 100, { tam: 21 });
     paragrafo(q.descricao, cx, y + 14, W - 100, { tam: 19, cor: C.sucesso });
-    paragrafo("Escolha este pombo na próxima partida, na tela de seleção.", cx, top + 534, W - 80, { tam: 18, cor: C.apagado });
-    if (S.tEstado > 0.8 && Math.floor(S.t * 2) % 2 === 0) txt("Toque para continuar a noite", cx, H - 70, { tam: 24, titulo: true });
+    paragrafo("Quer trocar de pombo agora? As penas e as cartas da bolsa seguem com você.",
+      cx, top + 500, W - 70, { tam: 17, cor: C.apagado });
+    S.botoesLiberado = S.tEstado > 0.8 ? [
+      Botao(W / 2 - 150, top + 548, 300, 54, "Seguir com " + S.pers.nome, () => seguirAposLiberado(false),
+        { primario: S.selLib === 0, tam: 24 }),
+      Botao(W / 2 - 150, top + 614, 300, 54, "Voar com " + q.nome, () => seguirAposLiberado(true),
+        { primario: S.selLib === 1, tam: 24 }),
+    ] : [];
+    desenharBotoes(S.botoesLiberado);
   };
   S.botoesPausa = [];
   const pausa = () => {
@@ -1612,3 +1656,6 @@ async function iniciar() {
 }
 iniciar();
 </script>
+
+</body>
+</html>

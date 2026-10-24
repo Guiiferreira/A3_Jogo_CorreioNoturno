@@ -197,12 +197,15 @@ class Partida(Cena):
                     self.estado = "jogando"
                     self.jogo.audio.tocar("menu_ok")
                     return
-            if self.estado == "liberado" and self.tempo_estado > 0.8:
-                if e.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-                    self.jogo.audio.tocar("menu_ok")
-                    self.novo_pombo = None
-                    self.proxima_fase()
-                    return
+            if self.estado == "liberado":
+                if self.tempo_estado > 0.8:
+                    r = self.menu_liberado.tratar(e)
+                    if r and r[0] == "escolher":
+                        if r[1] == 1:
+                            self._trocar_pombo(self.novo_pombo)
+                        self.novo_pombo = None
+                        self.proxima_fase()
+                return
             if e.key in (pygame.K_ESCAPE, pygame.K_p) and self.estado in ("jogando", "interludio"):
                 self._pausar()
             elif e.key == pygame.K_SPACE and self.estado == "jogando":
@@ -232,6 +235,8 @@ class Partida(Cena):
             self.menu_pausa.atualizar(dt)
             return
         if self.estado in ("interludio", "liberado"):
+            if self.estado == "liberado":
+                self.menu_liberado.atualizar(dt)
             self.cenario.atualizar(dt, self.fase["rolagem"] * 0.3)
             return
         if self.estado == "terminando":
@@ -244,6 +249,10 @@ class Partida(Cena):
             if self.tempo_estado > 1.8:
                 if self.novo_pombo:
                     self.estado, self.tempo_estado = "liberado", 0.0
+                    novo = config.PERSONAGENS_POR_ID[self.novo_pombo]
+                    self.menu_liberado = Menu(
+                        [f"Seguir com {self.personagem['nome']}", f"Voar com {novo['nome']}"],
+                        self.jogo.audio, tamanho=34, espaco=44)
                     self.jogo.audio.tocar("vitoria", 0.7)
                 else:
                     self.proxima_fase()
@@ -387,6 +396,27 @@ class Partida(Cena):
                 for pers in config.PERSONAGENS:
                     if pers["libera"] == self.indice_fase + 1 and dados.liberar(pers["id"]):
                         self.novo_pombo = pers["id"]
+
+    def _trocar_pombo(self, personagem_id):
+        """Troca de pombo entre as fases, sem perder a noite.
+
+        As penas acompanham a diferença entre os pombos (o Tião chega com uma a
+        mais, a Pipoca com uma a menos), mas nunca ficam abaixo de 1.
+        """
+        antigo, novo = self.personagem, config.PERSONAGENS_POR_ID[personagem_id]
+        velho = self.pombo
+        vidas = velho.vidas + novo["vidas"] - antigo["vidas"]
+        vidas = max(1, min(config.POMBO_VIDAS_MAX, vidas))
+        p = Pombo(novo, vidas)
+        p.vidas_iniciais = max(1, self.dif["vidas"] + novo["vidas"])
+        p.x, p.y = velho.x, velho.y
+        p.cartas = min(velho.cartas, p.capacidade)
+        p.carta_especial = velho.carta_especial
+        self.pombo, self.personagem = p, novo
+        # a próxima partida já começa com ele selecionado
+        self.jogo.opcoes["personagem"] = personagem_id
+        self.jogo.salvar_opcoes()
+        self.jogo.audio.tocar("asa")
 
     def _pegar_powerup(self, pu):
         p = self.pombo
@@ -590,12 +620,12 @@ class Partida(Cena):
 
     def _desenhar_liberado(self, tela):
         """Apresenta o pombo que acabou de ser liberado (quem o Bico conheceu na rota)."""
-        escurecer(tela, 170)
+        escurecer(tela, 215)
         novo = config.PERSONAGENS_POR_ID[self.novo_pombo]
         cx = config.LARGURA // 2
         pulo = abs(math.sin(self.t * 3)) * 6
         texto(tela, "Novo pombo liberado!", 60, (cx, 80), config.COR_DESTAQUE, negrito=True)
-        caixa = pygame.Rect(110, 130, config.LARGURA - 220, 330)
+        caixa = pygame.Rect(110, 130, config.LARGURA - 220, 300)
         painel(tela, caixa)
         retrato = pygame.transform.scale_by(imagem("retrato_" + novo["id"]), 1.5)
         tela.blit(retrato, retrato.get_rect(center=(caixa.left + 110, caixa.top + 110 - pulo)))
@@ -608,10 +638,10 @@ class Partida(Cena):
                       caixa.width - 250, ancora_x="left")
         paragrafo(tela, novo["descricao"], 24, caixa.left + 220, y + 20, caixa.width - 250,
                   cor=config.COR_SUCESSO, ancora_x="left")
-        texto(tela, "Escolha este pombo na próxima partida, na tela de seleção.", 24,
-              (cx, caixa.bottom + 34), config.COR_TEXTO_APAGADO)
-        if self.tempo_estado > 0.8 and int(self.t * 2) % 2 == 0:
-            texto(tela, "Enter para continuar a noite", 30, (cx, caixa.bottom + 90))
+        texto(tela, "Quer trocar de pombo agora? As penas e as cartas da bolsa seguem com você.",
+              22, (cx, caixa.bottom + 26), config.COR_TEXTO_APAGADO)
+        if self.tempo_estado > 0.8:
+            self.menu_liberado.desenhar(tela, cx, caixa.bottom + 74)
 
     def _desenhar_pausa(self, tela):
         escurecer(tela, 160)
