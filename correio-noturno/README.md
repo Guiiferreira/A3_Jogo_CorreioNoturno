@@ -108,7 +108,7 @@ Ao levar dano o pombo perde uma pena (vida), pisca por um tempo sem poder ser at
 | Neblina, a pomba do porto | Quase não sente o vento e a neblina quase não atrapalha, mas a bolsa só leva 2 cartas | Concluir a fase 3 |
 | Dourado (secreto) | Um pouco melhor em tudo | Vencer o jogo |
 
-Basta concluir a fase uma vez, com qualquer pombo e em qualquer dificuldade, mesmo que a partida termine em derrota depois. O progresso fica salvo em `dados/progresso.json`. Na tela de seleção, os pombos bloqueados aparecem como silhueta, com a dica de como liberar.
+Basta concluir a fase uma vez, com qualquer pombo e em qualquer dificuldade, mesmo que a partida termine em derrota depois. O progresso fica salvo em `dados/progresso.json`. Na tela de seleção, os pombos bloqueados aparecem como silhueta, com a dica de como liberar. Para liberar todos de novo desde o começo, use **Zerar progresso** em Opções: o jogo pede confirmação e volta a deixar só o Bico liberado, sem apagar recordes nem opções.
 
 Quando um pombo é liberado no fim de uma fase, o jogo pergunta se você quer seguir com o pombo atual ou voar com o novo a partir da fase seguinte, sem recomeçar a noite. As cartas da bolsa vão junto, e as penas mudam conforme o pombo: com o Tião você ganha uma pena, com a Pipoca perde uma, mas nunca fica com menos de uma.
 

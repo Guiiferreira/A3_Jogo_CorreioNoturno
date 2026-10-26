@@ -96,8 +96,11 @@ class Opcoes(TelaComFundo):
             lambda: f"Efeitos:  < {jogo.audio.vol_efeitos} >",
             lambda: f"Som:  {'desligado' if jogo.audio.mudo else 'ligado'}",
             lambda: f"Tela cheia:  {'sim' if op['tela_cheia'] else 'não'}",
+            lambda: "Enter de novo para zerar" if self.confirmar > 0 else "Zerar progresso",
             "Voltar",
-        ], jogo.audio, tamanho=40, espaco=60)
+        ], jogo.audio, tamanho=38, espaco=48)
+        self.confirmar = 0.0    # segundos que o pedido de confirmação fica valendo
+        self.aviso = 0.0        # segundos que a mensagem "progresso zerado" fica na tela
 
     def evento(self, e):
         super().evento(e)
@@ -119,7 +122,19 @@ class Opcoes(TelaComFundo):
             audio.alternar_mudo()
         elif i == 4:
             self.jogo.alternar_tela_cheia()
-        elif i == 5 and acao == "escolher":
+        elif i == 5:
+            if acao != "escolher":
+                return
+            # pede confirmação: só zera no segundo Enter
+            if self.confirmar > 0:
+                dados.zerar_liberados()
+                self.jogo.opcoes["personagem"] = "bico"
+                self.confirmar, self.aviso = 0.0, 3.0
+                self.jogo.audio.tocar("derrota", 0.5)
+            else:
+                self.confirmar = 4.0
+                self.jogo.audio.tocar("menu_mover")
+        elif i == 6 and acao == "escolher":
             self.voltar()
             return
         self.jogo.salvar_opcoes()
@@ -127,12 +142,24 @@ class Opcoes(TelaComFundo):
     def atualizar(self, dt):
         super().atualizar(dt)
         self.menu.atualizar(dt)
+        if self.menu.indice != 5:
+            self.confirmar = 0.0
+        self.confirmar = max(0.0, self.confirmar - dt)
+        self.aviso = max(0.0, self.aviso - dt)
 
     def desenhar(self, tela):
         super().desenhar(tela)
-        caixa = pygame.Rect(180, 120, 600, 420)
+        caixa = pygame.Rect(180, 110, 600, 430)
         painel(tela, caixa)
-        self.menu.desenhar(tela, config.LARGURA // 2, 175)
+        self.menu.desenhar(tela, config.LARGURA // 2, 155)
+        if self.aviso > 0:
+            msg, cor = "Progresso zerado: só o Bico está liberado.", config.COR_SUCESSO
+        elif self.confirmar > 0:
+            msg, cor = "Os pombos liberados voltam a ficar bloqueados. Recordes e opções ficam.", config.COR_PERIGO
+        else:
+            n = len(dados.carregar_liberados())
+            msg, cor = f"{n} de {len(config.PERSONAGENS)} pombos liberados", config.COR_TEXTO_APAGADO
+        texto(tela, msg, 22, (config.LARGURA // 2, caixa.bottom - 56), cor)
         texto(tela, "Use < e > (ou A e D) para mudar os valores", 22,
               (config.LARGURA // 2, caixa.bottom + 30), config.COR_TEXTO_APAGADO)
         d = config.DIFICULDADES[self.jogo.opcoes["dificuldade"]]

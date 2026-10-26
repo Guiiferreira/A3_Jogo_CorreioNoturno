@@ -89,3 +89,8 @@ def liberar(personagem_id):
     liberados.append(personagem_id)
     _escrever(ARQ_PROGRESSO, {"liberados": liberados})
     return True
+
+
+def zerar_liberados():
+    """Volta o progresso ao começo: só o Bico liberado. Recordes e opções ficam."""
+    _escrever(ARQ_PROGRESSO, {"liberados": ["bico"]})
