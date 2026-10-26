@@ -110,6 +110,8 @@ Ao levar dano o pombo perde uma pena (vida), pisca por um tempo sem poder ser at
 
 Basta concluir a fase uma vez, com qualquer pombo e em qualquer dificuldade, mesmo que a partida termine em derrota depois. O progresso fica salvo em `dados/progresso.json`. Na tela de seleção, os pombos bloqueados aparecem como silhueta, com a dica de como liberar.
 
+Quando um pombo é liberado no fim de uma fase, o jogo pergunta se você quer seguir com o pombo atual ou voar com o novo a partir da fase seguinte, sem recomeçar a noite. As cartas da bolsa vão junto, e as penas mudam conforme o pombo: com o Tião você ganha uma pena, com a Pipoca perde uma, mas nunca fica com menos de uma.
+
 **Power-ups:** pão (voa 45% mais rápido por 6 s), lanterna (uma seta aponta a janela ou a carta mais próxima por 12 s e a neblina quase some) e asa extra (+1 pena, até 5).
 
 **Como perder:** o relógio chega às 6h (final "O sol nasceu primeiro") ou as penas acabam (final "Bico ficou sem forças").
@@ -213,7 +215,7 @@ Usamos IA neste trabalho.
 | | |
 |---|---|
 | ![Seleção](docs/capturas/02_selecao.png) | ![Pombo liberado](docs/capturas/10_liberado.png) |
-| Escolha do pombo (bloqueados em silhueta) | Pombo novo liberado ao concluir a fase |
+| Escolha do pombo (bloqueados em silhueta) | Pombo novo liberado ao concluir a fase, com a opção de trocar |
 | ![Introdução](docs/capturas/02_intro.png) | ![Começo da fase](docs/capturas/03_interludio.png) |
 | Introdução da história | Fala do Bico antes da fase |
 | ![Fase 1](docs/capturas/04_fase1.png) | ![Fase 2](docs/capturas/05_fase2.png) |
