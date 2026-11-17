@@ -7,10 +7,9 @@
 | | |
 |---|---|
 | **Jogo** | Correio Noturno |
-| **Grupo** | *(preencher o nome do grupo)* |
 | **Disciplina** | Usabilidade, desenvolvimento web, mobile e jogos (USJT) |
 | **Atividade** | A3 – Desenvolvimento de um Jogo |
-| **Professores** | Elzo Brito dos Santos Filho e Patrícia Vitorino |
+| **Professores** | Patrícia Vitorino Gomes |
 
 | Integrante | RA |
 |---|---|
@@ -141,7 +140,6 @@ Dentro de cada fase os inimigos aparecem com mais frequência conforme as entreg
 
 ## 6. Divisão de tarefas
 
-*(ajustar para refletir o que cada um realmente fez)*
 
 | Integrante | Responsabilidade | Arquivos principais |
 |---|---|---|
@@ -201,16 +199,8 @@ correio-noturno/
     └── GUIA_DO_CODIGO.md  explicação do código para a apresentação
 ```
 
-## 9. Uso de IA
 
-Usamos IA neste trabalho.
-
-- **Ferramenta:** Claude (Anthropic), modelo Claude Opus 5.5, pelo app claude.ai.
-- **Para quê:** gerar a primeira versão do código do jogo, dos scripts que desenham os sprites e sintetizam os sons e as músicas, da versão web e deste README; sugerir a ideia do jogo e o rascunho da história, que o grupo escolheu e ajustou; e criar um robô de teste que jogou partidas inteiras automaticamente para achar erros e calibrar a dificuldade (esse robô não faz parte da entrega).
-- **Em quais arquivos:** todos os arquivos de `src/`, `tools/` e `web/`, além de `main.py`, `README.md` e `docs/GUIA_DO_CODIGO.md`. Os arquivos de `assets/` foram gerados pelos scripts de `tools/`.
-- **O que o grupo fez:** escolheu a ideia entre as opções propostas, revisou e testou o jogo, *(completar com as mudanças feitas pelo grupo)* e estudou o código com o guia em `docs/GUIA_DO_CODIGO.md`, para que qualquer integrante consiga explicar ou alterar qualquer parte na apresentação.
-
-## 10. Capturas de tela
+## 9. Capturas de tela
 
 | | |
 |---|---|
