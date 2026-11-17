@@ -222,7 +222,7 @@ class Creditos(TelaComFundo):
         texto(tela, "Correio Noturno", 40, (cx, caixa.top + 34), config.COR_DESTAQUE, negrito=True)
         texto(tela, "A3 · Usabilidade, desenvolvimento web, mobile e jogos · USJT", 22,
               (cx, caixa.top + 68), config.COR_TEXTO_APAGADO)
-        texto(tela, "Profs. Elzo Brito dos Santos Filho e Patrícia Vitorino", 22, (cx, caixa.top + 92),
+        texto(tela, "Prof:Patrícia Vitorino", 22, (cx, caixa.top + 92),
               config.COR_TEXTO_APAGADO)
         y = caixa.top + 136
         for i, nome in enumerate(self.INTEGRANTES):
@@ -233,6 +233,6 @@ class Creditos(TelaComFundo):
                         "scripts da pasta tools/ (sem assets de terceiros). "
                         "Feito com Python e pygame-ce.",
                   23, cx, y, caixa.width - 80)
-        paragrafo(tela, "Uso de IA declarado no README.", 23, cx, y + 80, caixa.width - 80,
+        paragrafo(tela, "", 23, cx, y + 80, caixa.width - 80,
                   cor=config.COR_TEXTO_APAGADO)
         texto(tela, "Obrigado por jogar!", 30, (cx, caixa.bottom - 34), config.COR_DESTAQUE)
